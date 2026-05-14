@@ -67,21 +67,21 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     actor Student as 学生
-    participant MiniApp as 学生端小程序
+    participant StudentWeb as 学生端网页
     participant PolicyService as 政策咨询服务
     participant KB as 知识库
 
-    Student->>MiniApp: 输入问题/关键词
-    MiniApp->>PolicyService: 提交咨询请求
+    Student->>StudentWeb: 输入问题/关键词
+    StudentWeb->>PolicyService: 提交咨询请求
     PolicyService->>KB: 检索问答、政策条目、附件链接
     KB-->>PolicyService: 返回匹配结果
 
     alt 命中标准答案
-        PolicyService-->>MiniApp: 返回答案、政策说明、附件/链接
-        MiniApp-->>Student: 展示咨询结果
+        PolicyService-->>StudentWeb: 返回答案、政策说明、附件/链接
+        StudentWeb-->>Student: 展示咨询结果
     else 未命中有效内容
-        PolicyService-->>MiniApp: 返回“未找到准确答案”提示
-        MiniApp-->>Student: 提示联系管理员或查看官方渠道
+        PolicyService-->>StudentWeb: 返回“未找到准确答案”提示
+        StudentWeb-->>Student: 提示联系管理员或查看官方渠道
     end
 ```
 
@@ -91,14 +91,14 @@ sequenceDiagram
 sequenceDiagram
     actor Student as 学生
     actor Admin as 管理员
-    participant MiniApp as 学生端小程序
+    participant StudentWeb as 学生端网页
     participant AppService as 申请服务
     participant Workflow as 审批流引擎
     participant DB as 业务数据库
     participant Notify as 通知服务
 
-    Student->>MiniApp: 填写申请表并提交
-    MiniApp->>AppService: 提交申请数据
+    Student->>StudentWeb: 填写申请表并提交
+    StudentWeb->>AppService: 提交申请数据
     AppService->>DB: 保存 Application(状态=待审核)
     AppService->>Workflow: 创建审批任务
     Workflow->>Notify: 向管理员发送待办通知
@@ -124,14 +124,14 @@ sequenceDiagram
 sequenceDiagram
     actor Student as 学生
     actor Admin as 管理员
-    participant MiniApp as 学生端小程序
+    participant StudentWeb as 学生端网页
     participant CertService as 证明生成服务
     participant DB as 业务数据库
     participant Template as 模板文件库
     participant Generator as PDF生成器
 
-    Student->>MiniApp: 选择证明类型并提交申请
-    MiniApp->>CertService: 提交证明申请
+    Student->>StudentWeb: 选择证明类型并提交申请
+    StudentWeb->>CertService: 提交证明申请
     CertService->>DB: 创建 Application
     Admin->>CertService: 审批通过
     CertService->>DB: 读取 StudentProfile
@@ -139,8 +139,8 @@ sequenceDiagram
     CertService->>Generator: 合并模板与学生信息
     Generator-->>CertService: 返回证明文件
     CertService->>DB: 保存 Certificate 记录
-    CertService-->>MiniApp: 返回预览/下载地址
-    MiniApp-->>Student: 展示电子证明
+    CertService-->>StudentWeb: 返回预览/下载地址
+    StudentWeb-->>Student: 展示电子证明
 ```
 
 ### 2.4 成绩分析顺序图
@@ -148,13 +148,13 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor Student as 学生
-    participant MiniApp as 学生端小程序
+    participant StudentWeb as 学生端网页
     participant AnalysisService as 成绩分析服务
     participant Parser as 成绩单解析器
     participant DB as 业务数据库
 
-    Student->>MiniApp: 上传成绩单文件
-    MiniApp->>AnalysisService: 提交成绩分析任务
+    Student->>StudentWeb: 上传成绩单文件
+    StudentWeb->>AnalysisService: 提交成绩分析任务
     AnalysisService->>DB: 保存 TranscriptTask(状态=待解析)
     AnalysisService->>Parser: 解析课程与学分信息
 
@@ -163,13 +163,13 @@ sequenceDiagram
         AnalysisService->>DB: 读取 TrainingPlan 和 CourseRequirement
         AnalysisService->>DB: 保存 AnalysisResult
         AnalysisService->>DB: 更新 TranscriptTask(状态=解析成功)
-        AnalysisService-->>MiniApp: 返回完成情况、缺失项、选课建议
-        MiniApp-->>Student: 展示分析结果
+        AnalysisService-->>StudentWeb: 返回完成情况、缺失项、选课建议
+        StudentWeb-->>Student: 展示分析结果
     else 解析失败
         Parser-->>AnalysisService: 返回失败原因
         AnalysisService->>DB: 更新 TranscriptTask(状态=解析失败)
-        AnalysisService-->>MiniApp: 提示重新上传或人工核对
-        MiniApp-->>Student: 展示失败信息
+        AnalysisService-->>StudentWeb: 提示重新上传或人工核对
+        StudentWeb-->>Student: 展示失败信息
     end
 ```
 
@@ -180,7 +180,7 @@ classDiagram
     class User {
         +user_id: String
         +role: String
-        +openid: String
+        +accountId: String
         +status: String
     }
 
