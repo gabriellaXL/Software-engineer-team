@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
+  <defs><style>.bg{fill:#f7f9fc}.lane{stroke:#b9c7d8;stroke-width:2;stroke-dasharray:8 8}.head{fill:#1f6fbf}.box{fill:#fff;stroke:#cbd7e6;stroke-width:2}.msg{stroke:#51677f;stroke-width:2;marker-end:url(#a)}.text{font-family:"Microsoft YaHei",Arial,sans-serif;fill:#1d2b3a}.white{font-family:"Microsoft YaHei",Arial,sans-serif;fill:#fff}.title{font-size:30px;font-weight:700}.small{font-size:17px}.label{font-size:20px;font-weight:700}</style><marker id="a" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M2,2 L10,6 L2,10 Z" fill="#51677f"/></marker></defs>
+  <rect class="bg" width="1280" height="760"/><text class="text title" x="50" y="55">申请审批顺序图</text>
+  <g>
+    <rect class="head" x="80" y="90" width="150" height="44" rx="8"/><text class="white label" x="135" y="119">学生</text><line class="lane" x1="155" y1="134" x2="155" y2="700"/>
+    <rect class="head" x="310" y="90" width="180" height="44" rx="8"/><text class="white label" x="345" y="119">学生端网页</text><line class="lane" x1="400" y1="134" x2="400" y2="700"/>
+    <rect class="head" x="570" y="90" width="160" height="44" rx="8"/><text class="white label" x="610" y="119">申请服务</text><line class="lane" x1="650" y1="134" x2="650" y2="700"/>
+    <rect class="head" x="810" y="90" width="170" height="44" rx="8"/><text class="white label" x="850" y="119">业务数据库</text><line class="lane" x1="895" y1="134" x2="895" y2="700"/>
+    <rect class="head" x="1060" y="90" width="150" height="44" rx="8"/><text class="white label" x="1095" y="119">管理员</text><line class="lane" x1="1135" y1="134" x2="1135" y2="700"/>
+  </g>
+  <g class="text small">
+    <line class="msg" x1="155" y1="185" x2="400" y2="185"/><text x="210" y="174">填写申请表并提交</text>
+    <line class="msg" x1="400" y1="245" x2="650" y2="245"/><text x="455" y="234">提交申请数据</text>
+    <line class="msg" x1="650" y1="305" x2="895" y2="305"/><text x="695" y="294">保存申请单</text>
+    <line class="msg" x1="650" y1="365" x2="1135" y2="365"/><text x="800" y="354">发送待审核提醒</text>
+    <line class="msg" x1="1135" y1="435" x2="650" y2="435"/><text x="820" y="424">审核通过/驳回</text>
+    <line class="msg" x1="650" y1="495" x2="895" y2="495"/><text x="690" y="484">写入审批记录</text>
+    <line class="msg" x1="650" y1="555" x2="400" y2="555"/><text x="450" y="544">返回审批结果</text>
+    <line class="msg" x1="400" y1="615" x2="155" y2="615"/><text x="210" y="604">站内消息通知</text>
+  </g>
+</svg>

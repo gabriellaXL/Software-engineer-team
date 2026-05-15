@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820">
+  <defs>
+    <style>.bg{fill:#f7f9fc}.sys{fill:#fff;stroke:#cbd7e6;stroke-width:2}.actor{fill:#1f6fbf}.admin{fill:#1f8a70}.case{fill:#eef5ff;stroke:#8bb7e8;stroke-width:2}.case2{fill:#edf9f4;stroke:#85cdb8;stroke-width:2}.text{font-family:"Microsoft YaHei",Arial,sans-serif;fill:#1d2b3a}.title{font-size:30px;font-weight:700}.small{font-size:17px}.label{font-size:20px;font-weight:700}.line{stroke:#718196;stroke-width:2}</style>
+  </defs>
+  <rect class="bg" width="1280" height="820"/>
+  <text class="text title" x="50" y="58">系统用例设计图</text>
+  <rect class="sys" x="240" y="100" width="820" height="650" rx="14"/>
+  <text class="text label" x="530" y="132">学院学生综合服务与党团管理平台</text>
+  <circle class="actor" cx="105" cy="260" r="24"/><line class="line" x1="105" y1="284" x2="105" y2="350"/><line class="line" x1="65" y1="315" x2="145" y2="315"/><line class="line" x1="105" y1="350" x2="70" y2="410"/><line class="line" x1="105" y1="350" x2="140" y2="410"/><text class="text label" x="80" y="445">学生</text>
+  <circle class="admin" cx="1165" cy="260" r="24"/><line class="line" x1="1165" y1="284" x2="1165" y2="350"/><line class="line" x1="1125" y1="315" x2="1205" y2="315"/><line class="line" x1="1165" y1="350" x2="1130" y2="410"/><line class="line" x1="1165" y1="350" x2="1200" y2="410"/><text class="text label" x="1135" y="445">管理员</text>
+  <g class="text small">
+    <ellipse class="case" cx="410" cy="190" rx="120" ry="34"/><text x="374" y="197">登录系统</text>
+    <ellipse class="case" cx="410" cy="275" rx="120" ry="34"/><text x="366" y="282">政策咨询</text>
+    <ellipse class="case" cx="410" cy="360" rx="120" ry="34"/><text x="346" y="367">查看党团流程</text>
+    <ellipse class="case" cx="410" cy="445" rx="120" ry="34"/><text x="366" y="452">提交申请</text>
+    <ellipse class="case" cx="410" cy="530" rx="120" ry="34"/><text x="346" y="537">下载电子证明</text>
+    <ellipse class="case" cx="410" cy="615" rx="120" ry="34"/><text x="346" y="622">成绩分析查看</text>
+    <ellipse class="case2" cx="850" cy="220" rx="130" ry="34"/><text x="798" y="227">维护知识库</text>
+    <ellipse class="case2" cx="850" cy="315" rx="130" ry="34"/><text x="790" y="322">通知精准推送</text>
+    <ellipse class="case2" cx="850" cy="410" rx="130" ry="34"/><text x="806" y="417">审核申请</text>
+    <ellipse class="case2" cx="850" cy="505" rx="130" ry="34"/><text x="790" y="512">配置流程节点</text>
+    <ellipse class="case2" cx="850" cy="600" rx="130" ry="34"/><text x="790" y="607">数据导入导出</text>
+  </g>
+  <g class="line">
+    <line x1="145" y1="315" x2="290" y2="190"/><line x1="145" y1="315" x2="290" y2="275"/><line x1="145" y1="315" x2="290" y2="360"/><line x1="145" y1="315" x2="290" y2="445"/><line x1="145" y1="315" x2="290" y2="530"/><line x1="145" y1="315" x2="290" y2="615"/>
+    <line x1="1125" y1="315" x2="980" y2="220"/><line x1="1125" y1="315" x2="980" y2="315"/><line x1="1125" y1="315" x2="980" y2="410"/><line x1="1125" y1="315" x2="980" y2="505"/><line x1="1125" y1="315" x2="980" y2="600"/>
+  </g>
+</svg>
