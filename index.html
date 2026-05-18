@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>学院学生综合服务与党团管理平台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="./imgs/logo.png" alt="中国人民大学信息学院" />
+          <div>
+            <strong>学院学生综合服务与党团管理平台</strong>
+            <span>学生事务 · 党团培养 · 智能咨询 · 审批证明</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <div class="role-switch" role="tablist" aria-label="端切换">
+            <button type="button" class="is-active" data-role="student" role="tab" aria-selected="true">学生端</button>
+            <button type="button" data-role="admin" role="tab" aria-selected="false">管理员端</button>
+          </div>
+          <button type="button" class="ghost-button" data-action="quick-search" aria-label="快速检索">
+            <span data-icon="search"></span>
+            快速检索
+          </button>
+        </div>
+      </header>
+      <main id="app" class="main-stage" aria-live="polite"></main>
+    </div>
+
+    <div class="modal" id="quickSearchModal" aria-hidden="true">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="quickSearchTitle">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">统一检索</p>
+            <h2 id="quickSearchTitle">政策、流程与模板</h2>
+          </div>
+          <button type="button" class="icon-button" data-action="close-modal" aria-label="关闭">
+            <span data-icon="x"></span>
+          </button>
+        </div>
+        <label class="search-field modal-search">
+          <span data-icon="search"></span>
+          <input id="globalSearchInput" type="search" placeholder="输入关键词，如奖学金、入党、在读证明" />
+        </label>
+        <div id="globalSearchResults" class="search-results"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>
