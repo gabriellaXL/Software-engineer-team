@@ -20,8 +20,11 @@ const icons = {
 };
 
 const state = {
-  role: "student",
-  studentView: "home",
+  role: null, // Default to null until logged in
+  isAuthenticated: false,
+  token: null,
+  userProfile: null,
+  studentView: "login", // Start at login view
   adminView: "dashboard",
   policyQuery: "",
   policyCategory: "全部",
@@ -157,12 +160,109 @@ function mountIcons(root = document) {
   });
 }
 
+const API_BASE_URL = 'http://localhost:3000/api';
+
+// Authentication API call
+async function login(accountId, password) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ accountId, password })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Login failed');
+    }
+
+    const data = await response.json();
+    
+    // Save token and state
+    state.token = data.token;
+    state.isAuthenticated = true;
+    state.role = data.user.role;
+    
+    // You can optionally save to localStorage to persist login
+    localStorage.setItem('sds_token', data.token);
+    
+    // Fetch profile
+    await fetchProfile();
+
+    // Redirect to home
+    if (state.role === 'admin' || state.role === 'teacher') {
+      state.adminView = 'dashboard';
+    } else {
+      state.studentView = 'home';
+    }
+    
+    render();
+    return true;
+  } catch (error) {
+    alert(error.message);
+    return false;
+  }
+}
+
+async function fetchProfile() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/profile`, {
+      headers: {
+        'Authorization': `Bearer ${state.token}`
+      }
+    });
+    if (response.ok) {
+      state.userProfile = await response.json();
+    }
+  } catch (error) {
+    console.error('Failed to fetch profile', error);
+  }
+}
+
 function render() {
   const app = document.getElementById("app");
+  
+  if (!state.isAuthenticated) {
+    app.innerHTML = renderLoginView();
+    return;
+  }
+
   app.innerHTML = state.role === "student" ? renderStudentShell() : renderAdminShell();
   mountIcons(app);
   syncRoleSwitch();
 }
+
+function renderLoginView() {
+  return `
+    <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f9fafb;">
+      <div class="panel" style="width: 400px; padding: 32px;">
+        <h2 style="text-align: center; margin-bottom: 24px; color: var(--primary);">学院学生综合服务平台</h2>
+        <form onsubmit="handleLoginSubmit(event)">
+          <label class="field full">
+            <span>账号</span>
+            <input type="text" id="accountId" placeholder="stu001 或 admin001" required>
+          </label>
+          <label class="field full">
+            <span>密码</span>
+            <input type="password" id="password" placeholder="123456" required>
+          </label>
+          <div class="toolbar field full" style="margin-top: 16px;">
+            <button type="submit" class="primary-button" style="width: 100%; justify-content: center;">登录</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+window.handleLoginSubmit = function(event) {
+  event.preventDefault();
+  const accountId = document.getElementById('accountId').value;
+  const password = document.getElementById('password').value;
+  login(accountId, password);
+};
 
 function syncRoleSwitch() {
   document.querySelectorAll("[data-role]").forEach((button) => {

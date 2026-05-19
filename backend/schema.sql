@@ -1,0 +1,108 @@
+-- 1. 将 sys_user 修改为 tb_user，避开系统内置关键字
+CREATE TABLE tb_user (
+    user_id VARCHAR(50) PRIMARY KEY,
+    role VARCHAR(50),
+    account_id VARCHAR(50) UNIQUE,
+    password VARCHAR(100),
+    status VARCHAR(20)
+);
+
+CREATE TABLE student_profile (
+    student_id VARCHAR(50) PRIMARY KEY,
+    user_id VARCHAR(50) REFERENCES tb_user(user_id), -- 这里同步修改
+    student_no VARCHAR(50),
+    name VARCHAR(50),
+    major VARCHAR(100),
+    grade VARCHAR(20),
+    phone VARCHAR(20)
+);
+
+CREATE TABLE admin_profile (
+    admin_id VARCHAR(50) PRIMARY KEY,
+    user_id VARCHAR(50) REFERENCES tb_user(user_id), -- 这里同步修改
+    name VARCHAR(50),
+    department VARCHAR(100),
+    role VARCHAR(50)
+);
+
+CREATE TABLE policy_item (
+    policy_id VARCHAR(50) PRIMARY KEY,
+    title VARCHAR(200),
+    category VARCHAR(50),
+    keywords TEXT,
+    content TEXT,
+    status VARCHAR(20)
+);
+
+CREATE TABLE qa_pair (
+    qa_id VARCHAR(50) PRIMARY KEY,
+    policy_id VARCHAR(50) REFERENCES policy_item(policy_id),
+    question TEXT,
+    answer TEXT,
+    priority INTEGER
+);
+
+CREATE TABLE template_file (
+    template_id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100),
+    type VARCHAR(50),
+    file_url VARCHAR(255),
+    version VARCHAR(20)
+);
+
+CREATE TABLE party_process_node (
+    node_id VARCHAR(50) PRIMARY KEY,
+    process_type VARCHAR(50),
+    node_name VARCHAR(100),
+    sequence INTEGER,
+    reminder_rule VARCHAR(100)
+);
+
+CREATE TABLE student_process_record (
+    record_id VARCHAR(50) PRIMARY KEY,
+    student_id VARCHAR(50) REFERENCES student_profile(student_id),
+    node_id VARCHAR(50) REFERENCES party_process_node(node_id),
+    status VARCHAR(20),
+    completed_time TIMESTAMP
+);
+
+CREATE TABLE application (
+    application_id VARCHAR(50) PRIMARY KEY,
+    student_id VARCHAR(50) REFERENCES student_profile(student_id),
+    type VARCHAR(50),
+    submit_time TIMESTAMP,
+    status VARCHAR(20)
+);
+
+CREATE TABLE approval_record (
+    approval_id VARCHAR(50) PRIMARY KEY,
+    application_id VARCHAR(50) REFERENCES application(application_id),
+    approver_id VARCHAR(50) REFERENCES admin_profile(admin_id),
+    result VARCHAR(20),
+    comment TEXT,
+    approval_time TIMESTAMP
+);
+
+CREATE TABLE certificate (
+    certificate_id VARCHAR(50) PRIMARY KEY,
+    application_id VARCHAR(50) REFERENCES application(application_id),
+    template_id VARCHAR(50) REFERENCES template_file(template_id),
+    file_url VARCHAR(255),
+    status VARCHAR(20)
+);
+
+CREATE TABLE transcript_task (
+    transcript_id VARCHAR(50) PRIMARY KEY,
+    student_id VARCHAR(50) REFERENCES student_profile(student_id),
+    file_url VARCHAR(255),
+    parse_status VARCHAR(20),
+    upload_time TIMESTAMP
+);
+
+CREATE TABLE analysis_result (
+    result_id VARCHAR(50) PRIMARY KEY,
+    transcript_id VARCHAR(50) REFERENCES transcript_task(transcript_id),
+    missing_module VARCHAR(100),
+    suggestion TEXT,
+    warning_level VARCHAR(20)
+);
