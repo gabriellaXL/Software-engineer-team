@@ -163,14 +163,14 @@ function mountIcons(root = document) {
 const API_BASE_URL = 'http://localhost:3000/api';
 
 // Authentication API call
-async function login(accountId, password) {
+async function login(accountId, password, role) {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ accountId, password })
+      body: JSON.stringify({ accountId, password, role })
     });
 
     if (!response.ok) {
@@ -184,6 +184,7 @@ async function login(accountId, password) {
     state.token = data.token;
     state.isAuthenticated = true;
     state.role = data.user.role;
+    state.user = data.user; // 保存真实用户信息
     
     // You can optionally save to localStorage to persist login
     localStorage.setItem('sds_token', data.token);
@@ -223,23 +224,84 @@ async function fetchProfile() {
 
 function render() {
   const app = document.getElementById("app");
+  const topbar = document.querySelector(".topbar");
   
+  // === 第一步：建造登录大门 ===
+  // 如果没有登录，就只显示登录界面，隐藏顶部的导航栏
   if (!state.isAuthenticated) {
+    if (topbar) topbar.style.display = 'none';
     app.innerHTML = renderLoginView();
     return;
   }
 
+  // === 第二步：登录成功后，展示真正的系统 ===
+  if (topbar) topbar.style.display = 'flex';
   app.innerHTML = state.role === "student" ? renderStudentShell() : renderAdminShell();
+  
+  // 隐藏原本用来测试的角色切换按钮
+  const roleSwitch = document.querySelector('.role-switch');
+  if (roleSwitch) roleSwitch.style.display = 'none';
+
   mountIcons(app);
   syncRoleSwitch();
 }
 
 function renderLoginView() {
+  const isRegistering = state.studentView === "register"; // Use studentView to toggle login/register for now
+  
+  if (isRegistering) {
+    return `
+      <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f9fafb;">
+        <div class="panel" style="width: 400px; padding: 32px;">
+          <h2 style="text-align: center; margin-bottom: 24px; color: var(--primary);">注册账号</h2>
+          <form onsubmit="handleRegisterSubmit(event)">
+            <label class="field full">
+              <span>注册身份 <span style="color:red">*</span></span>
+              <select id="regRole" required style="margin-top: 4px;">
+                <option value="student">学生端</option>
+                <option value="admin">管理员端</option>
+              </select>
+            </label>
+            <label class="field full">
+              <span>学号/工号 <span style="color:red">*</span></span>
+              <input type="text" id="regAccountId" placeholder="请输入学号或工号" required>
+            </label>
+            <label class="field full">
+              <span>姓名 <span style="color:red">*</span></span>
+              <input type="text" id="regUsername" placeholder="请输入真实姓名" required>
+            </label>
+            <label class="field full">
+              <span>密码 <span style="color:red">*</span></span>
+              <input type="password" id="regPassword" placeholder="至少6位密码" required minlength="6">
+            </label>
+            <label class="field full">
+              <span>确认密码 <span style="color:red">*</span></span>
+              <input type="password" id="regConfirmPassword" placeholder="请再次输入密码" required minlength="6">
+            </label>
+            <div class="toolbar field full" style="margin-top: 16px;">
+              <button type="submit" class="primary-button" style="width: 100%; justify-content: center;">注册</button>
+            </div>
+            <div style="text-align: center; margin-top: 16px; font-size: 14px;">
+              <a href="#" onclick="toggleAuthView(event, 'login')" style="color: var(--brand); text-decoration: none;">已有账号？点击登录</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f9fafb;">
       <div class="panel" style="width: 400px; padding: 32px;">
         <h2 style="text-align: center; margin-bottom: 24px; color: var(--primary);">学院学生综合服务平台</h2>
         <form onsubmit="handleLoginSubmit(event)">
+          <label class="field full">
+            <span>登录身份 <span style="color:red">*</span></span>
+            <select id="loginRole" required style="margin-top: 4px;">
+              <option value="student">学生端</option>
+              <option value="admin">管理员端</option>
+            </select>
+          </label>
           <label class="field full">
             <span>账号</span>
             <input type="text" id="accountId" placeholder="stu001 或 admin001" required>
@@ -251,17 +313,62 @@ function renderLoginView() {
           <div class="toolbar field full" style="margin-top: 16px;">
             <button type="submit" class="primary-button" style="width: 100%; justify-content: center;">登录</button>
           </div>
+          <div style="text-align: center; margin-top: 16px; font-size: 14px;">
+            <a href="#" onclick="toggleAuthView(event, 'register')" style="color: var(--brand); text-decoration: none;">没有账号？点击注册</a>
+          </div>
         </form>
       </div>
     </div>
   `;
 }
 
+window.toggleAuthView = function(event, view) {
+  event.preventDefault();
+  state.studentView = view;
+  render();
+};
+
+window.handleRegisterSubmit = async function(event) {
+  event.preventDefault();
+  const accountId = document.getElementById('regAccountId').value.trim();
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const confirmPassword = document.getElementById('regConfirmPassword').value;
+  const role = document.getElementById('regRole').value;
+
+  if (password !== confirmPassword) {
+    alert("两次输入的密码不一致，请重新输入！");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ accountId, password, username, role })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || '注册失败');
+    }
+
+    alert("注册成功！请登录。");
+    state.studentView = "login";
+    render();
+  } catch (error) {
+    alert(error.message);
+  }
+};
+
 window.handleLoginSubmit = function(event) {
   event.preventDefault();
   const accountId = document.getElementById('accountId').value;
   const password = document.getElementById('password').value;
-  login(accountId, password);
+  const role = document.getElementById('loginRole').value;
+  login(accountId, password, role);
 };
 
 function syncRoleSwitch() {
@@ -299,12 +406,21 @@ function renderSidebar(kind) {
   const nav = kind === "student" ? studentNav : adminNav;
   const active = kind === "student" ? state.studentView : state.adminView;
   const subtitle = kind === "student" ? "学生端 Web" : "管理员端 PC 后台";
+  
+  // 使用真实后端获取到的数据替换假数据
+  const profileName = state.userProfile?.name || "未知用户";
+  const profileId = state.userProfile?.student_no || state.userProfile?.admin_id || "未知编号";
+  const profileDesc = kind === "student" ? "普通学生" : (state.userProfile?.role || "管理老师");
+
   const profile = kind === "student"
-    ? ["普通学生", "2023120000", "当前阶段：培养考察"]
-    : ["管理老师", "admin01", "系统管理员"];
+    ? [profileDesc, profileName + " / " + profileId, "当前阶段：培养考察"]
+    : [profileDesc, profileName, "系统管理员"];
+  
+  const logoHtml = kind === "student" ? "" : `<img class="sidebar-logo" src="./imgs/logo.png" alt="中国人民大学信息学院" />`;
+
   return `
     <aside class="sidebar">
-      <img class="sidebar-logo" src="./imgs/logo.png" alt="中国人民大学信息学院" />
+      ${logoHtml}
       <p class="side-title">${kind === "student" ? "学生综合服务" : "后台管理"}</p>
       <p class="side-subtitle">${subtitle}</p>
       <nav class="side-nav" aria-label="${subtitle}导航">
@@ -319,6 +435,7 @@ function renderSidebar(kind) {
         <strong>${profile[0]}</strong>
         <span>${profile[1]}</span>
         <span>${profile[2]}</span>
+        <button class="ghost-button" style="margin-top: 12px; width: 100%; padding: 6px;" data-action="logout">退出登录</button>
       </div>
     </aside>
   `;
@@ -1362,6 +1479,16 @@ document.addEventListener("click", (event) => {
     closeModal();
     return;
   }
+  // === 第三步：处理退出登录 ===
+  if (action === "logout") {
+    state.isAuthenticated = false;
+    state.token = null;
+    state.userProfile = null;
+    localStorage.removeItem('sds_token');
+    render();
+    showToast("已安全退出");
+    return;
+  }
   if (action === "student-new-application") {
     state.studentView = "applications";
     state.role = "student";
@@ -1396,10 +1523,41 @@ document.addEventListener("input", (event) => {
   }
 });
 
-document.addEventListener("submit", (event) => {
+document.addEventListener("submit", async (event) => {
   const form = event.target.closest("form");
   if (!form) return;
   event.preventDefault();
+
+  // === 第三步：绑定开门逻辑（向后端发送登录请求） ===
+  if (form.id === "loginForm") {
+    const accountId = document.getElementById("accountId").value;
+    const password = document.getElementById("password").value;
+    
+    try {
+      // 呼叫快递员，把账号密码送去后端的 /auth/login 接口
+      const data = await fetchAPI('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ accountId, password })
+      });
+      
+      // 后端验证通过了！给了我们通行证（token）和用户信息
+      state.token = data.token;
+      state.user = data.user;
+      state.isLoggedIn = true;
+      state.role = data.user.role === 'student' ? 'student' : 'admin';
+      
+      // 存到浏览器的兜里，刷新页面也不会掉
+      localStorage.setItem('sds_token', data.token);
+      localStorage.setItem('sds_user', JSON.stringify(data.user));
+      
+      showToast("登录成功！");
+      render(); // 重新画出界面（这次就会显示真正的系统界面了）
+    } catch (error) {
+      showToast(error.message); // 如果密码错了，后端会报错，我们在这里提示给用户
+    }
+    return;
+  }
+
   showToast(form.dataset.form === "application" ? "申请已提交，状态更新为待审核。" : "内容已保存。");
 });
 
