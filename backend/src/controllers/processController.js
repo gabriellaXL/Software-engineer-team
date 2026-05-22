@@ -1,7 +1,7 @@
 const db = require('../config/db');
 
 exports.getProcessNodes = async (req, res) => {
-  const { processType } = req.query;
+  const processType = req.query.processType || 'party';
   try {
     const { rows } = await db.query('SELECT * FROM party_process_node WHERE process_type = $1 ORDER BY sequence ASC', [processType]);
     res.json(rows);
@@ -13,12 +13,24 @@ exports.getProcessNodes = async (req, res) => {
 exports.getStudentProgress = async (req, res) => {
   const { studentId } = req.query;
   try {
+    let resolvedStudentId = studentId;
+    if (!resolvedStudentId && (req.user.role === 'student' || req.user.role === 'student_leader')) {
+      const { rows: profileRows } = await db.query(
+        'SELECT student_id FROM student_profile WHERE user_id = $1',
+        [req.user.userId]
+      );
+      resolvedStudentId = profileRows[0]?.student_id;
+    }
+    if (!resolvedStudentId) {
+      return res.status(404).json({ error: 'Student profile not found' });
+    }
+
     const { rows } = await db.query(
       `SELECT r.*, n.node_name, n.process_type, n.sequence 
        FROM student_process_record r 
        JOIN party_process_node n ON r.node_id = n.node_id 
        WHERE r.student_id = $1 ORDER BY n.sequence ASC`,
-      [studentId || req.user.userId]
+      [resolvedStudentId]
     );
     res.json(rows);
   } catch (err) {

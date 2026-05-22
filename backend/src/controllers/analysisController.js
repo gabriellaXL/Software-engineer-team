@@ -5,12 +5,20 @@ exports.uploadTranscript = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
+    const { rows: profileRows } = await db.query(
+      'SELECT student_id FROM student_profile WHERE user_id = $1',
+      [req.user.userId]
+    );
+    if (profileRows.length === 0) {
+      return res.status(404).json({ error: 'Student profile not found' });
+    }
+
     const transcriptId = `TRN-${Date.now()}`;
     const fileUrl = `/uploads/${req.file.filename}`;
 
     const { rows } = await db.query(
       'INSERT INTO transcript_task (transcript_id, student_id, file_url, parse_status, upload_time) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP) RETURNING *',
-      [transcriptId, req.user.userId, fileUrl, 'Pending']
+      [transcriptId, profileRows[0].student_id, fileUrl, 'Pending']
     );
 
     // Mock asynchronous parsing task
