@@ -806,7 +806,7 @@ function renderApplications() {
         <form class="form-grid" data-form="application">
           <label class="field">
             <span>申请类型</span>
-            <select required>
+            <select name="type" required>
               <option>在读证明开具</option>
               <option>党员材料补交</option>
               <option>奖学金材料确认</option>
@@ -814,19 +814,20 @@ function renderApplications() {
           </label>
           <label class="field">
             <span>用途</span>
-            <input type="text" placeholder="如实习、签证、奖学金" required />
+            <input type="text" name="purpose" placeholder="如实习、签证、奖学金" required />
           </label>
           <label class="field full">
             <span>说明</span>
-            <textarea placeholder="请补充使用场景、接收单位或特殊要求"></textarea>
+            <textarea name="comment" placeholder="请补充使用场景、接收单位或特殊要求"></textarea>
           </label>
           <label class="field full">
-            <span>附件上传</span>
-            <input type="file" />
+            <span>附件上传 (限PDF)</span>
+            <input type="file" name="file" accept=".pdf" />
           </label>
           <div class="toolbar field full">
             <button type="submit" class="primary-button">${icon("upload")}提交申请</button>
             <button type="button" class="ghost-button" data-action="save-draft">${icon("file")}保存草稿</button>
+            <button type="button" class="secondary-button" data-action="open-drafts">${icon("file")}草稿箱</button>
           </div>
         </form>
       </div>
@@ -857,10 +858,18 @@ function renderApplications() {
           <h2>近一年审批留痕</h2>
         </div>
       </div>
-      ${table(["申请单号", "类型", "状态", "提交时间", "操作"], [
-        ["APP-202605-001", "在读证明开具", badge("待审核", "warning"), "今天 09:18", actionButton("查看")],
-        ["APP-202604-022", "成绩排名证明", badge("已通过", "success"), "2026-04-22", actionButton("下载")],
-        ["APP-202604-009", "党员材料补交", badge("待补充", "danger"), "2026-04-14", actionButton("补交")]
+      ${table(["申请单号", "类型", "状态", "提交时间", "操作"], applications.length > 0 ? applications.map(item => [
+        item.id,
+        item.type,
+        badge(item.status, item.status === "已通过" ? "success" : (item.status === "待补充" ? "danger" : "warning")),
+        item.submit,
+        actionButton(
+          item.status === "已通过" ? "下载" : (item.status === "待补充" ? "补交" : "查看"),
+          item.status === "待补充" ? "resubmit-application" : "table-action",
+          item.id
+        )
+      ]) : [
+        ["-", "暂无记录", "-", "-", "-"]
       ])}
     </section>
   `;

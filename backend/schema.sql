@@ -70,6 +70,7 @@ CREATE TABLE application (
     application_id VARCHAR(50) PRIMARY KEY,
     student_id VARCHAR(50) REFERENCES student_profile(student_id),
     type VARCHAR(50),
+    content TEXT,
     submit_time TIMESTAMP,
     status VARCHAR(20)
 );
