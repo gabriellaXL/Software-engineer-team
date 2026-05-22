@@ -33,6 +33,15 @@ const state = {
   isPolicyLoading: false,
   policyError: "",
   editingPolicyId: null,
+  processNodes: [],
+  processRecords: [],
+  isProcessLoading: false,
+  processError: "",
+  transcriptId: null,
+  transcriptTask: null,
+  analysisResult: null,
+  isAnalysisLoading: false,
+  analysisError: "",
   noticeFilter: "全部",
   selectedApproval: "APP-202605-001",
   mobileMenuOpen: false
@@ -231,6 +240,143 @@ async function fetchPolicies(options = {}) {
   }
 }
 
+function normalizeProcessStatus(status) {
+  const value = String(status || "").toLowerCase();
+  if (["completed", "done", "approved", "finished"].includes(value)) return "done";
+  if (["inprogress", "in_progress", "active", "pending", "pendingreview"].includes(value)) return "active";
+  return "next";
+}
+
+function formatProcessDate(value, fallback = "待激活") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+
+function getProcessTimeline() {
+  if (!state.processNodes.length) return processNodes;
+
+  const recordByNodeId = new Map(state.processRecords.map((record) => [record.node_id, record]));
+  let hasActive = false;
+
+  return state.processNodes.map((node) => {
+    const record = recordByNodeId.get(node.node_id);
+    let status = record ? normalizeProcessStatus(record.status) : "next";
+    if (status === "active") hasActive = true;
+    if (!record && !hasActive) {
+      status = "active";
+      hasActive = true;
+    }
+    return {
+      id: node.node_id,
+      name: node.node_name || node.name || "未命名节点",
+      status,
+      date: status === "done" ? formatProcessDate(record?.completed_time) : (status === "active" ? "进行中" : "待激活"),
+      detail: node.reminder_rule || record?.comment || "请按流程要求完成当前节点。"
+    };
+  });
+}
+
+async function fetchProcessData(options = {}) {
+  const canViewProcess = state.role === "student" || state.role === "student_leader";
+  if (!state.token || !canViewProcess) {
+    state.processNodes = [];
+    state.processRecords = [];
+    state.processError = "";
+    return getProcessTimeline();
+  }
+
+  state.isProcessLoading = true;
+  state.processError = "";
+  if (options.renderBefore) render();
+
+  try {
+    const [nodesResponse, progressResponse] = await Promise.all([
+      fetch(`${API_BASE_URL}/process/nodes?processType=party`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/process/progress`, { headers: apiHeaders() })
+    ]);
+    const nodes = await nodesResponse.json();
+    const progress = await progressResponse.json();
+    if (!nodesResponse.ok) throw new Error(nodes.error || "流程节点获取失败");
+    if (!progressResponse.ok) throw new Error(progress.error || "学生进度获取失败");
+    state.processNodes = Array.isArray(nodes) ? nodes : [];
+    state.processRecords = Array.isArray(progress) ? progress : [];
+    return getProcessTimeline();
+  } catch (error) {
+    state.processError = error.message;
+    if (!options.silent) showToast(`流程接口异常：${error.message}`);
+    return getProcessTimeline();
+  } finally {
+    state.isProcessLoading = false;
+  }
+}
+
+async function fetchAnalysisResult(transcriptId, options = {}) {
+  if (!transcriptId) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/analysis/${encodeURIComponent(transcriptId)}`, {
+      headers: apiHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (response.status === 404 && options.allowPending) return null;
+      throw new Error(data.error || data.message || "成绩分析结果获取失败");
+    }
+    state.analysisResult = data;
+    state.analysisError = "";
+    return data;
+  } catch (error) {
+    if (!options.allowPending) state.analysisError = error.message;
+    return null;
+  }
+}
+
+async function waitForAnalysisResult(transcriptId) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await fetchAnalysisResult(transcriptId, { allowPending: true });
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("成绩单仍在解析中，请稍后刷新查看结果");
+}
+
+async function uploadTranscriptFile(file) {
+  if (!state.token) throw new Error("请先登录后再上传成绩单");
+  if (!file) throw new Error("请选择需要上传的成绩单文件");
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  state.isAnalysisLoading = true;
+  state.analysisError = "";
+  state.analysisResult = null;
+  render();
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/analysis/upload`, {
+      method: "POST",
+      headers: apiHeaders(),
+      body: formData
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "成绩单上传失败");
+
+    state.transcriptTask = data;
+    state.transcriptId = data.transcript_id;
+    await waitForAnalysisResult(data.transcript_id);
+    showToast("成绩单解析完成，已刷新分析结果。");
+  } catch (error) {
+    state.analysisError = error.message;
+    showToast(error.message);
+  } finally {
+    state.isAnalysisLoading = false;
+    render();
+  }
+}
+
 async function savePolicy(payload) {
   const response = await fetch(`${API_BASE_URL}/policies/maintain`, {
     method: "POST",
@@ -274,6 +420,9 @@ async function login(accountId, password, role) {
     // Fetch profile
     await fetchProfile();
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
+    if (state.role === "student" || state.role === "student_leader") {
+      await fetchProcessData({ silent: true });
+    }
 
     // Redirect to home
     if (state.role === 'admin' || state.role === 'teacher') {
@@ -893,7 +1042,11 @@ function renderAnalysis() {
           ${icon("upload")}
           <strong>拖拽文件到此处或选择文件</strong>
           <p>解析失败时可转入人工核对申请。</p>
+          <input id="transcriptFileInput" type="file" accept=".pdf,.csv,.xls,.xlsx" hidden />
           <button type="button" class="secondary-button" data-action="upload-transcript">${icon("upload")}选择文件</button>
+          ${state.transcriptTask ? `<p>Transcript ID: ${escapeHtml(state.transcriptTask.transcript_id || "")}</p>` : ""}
+          ${state.isAnalysisLoading ? `<p>成绩单正在上传或解析，请稍候。</p>` : ""}
+          ${state.analysisError ? `<p class="danger-text">${escapeHtml(state.analysisError)}</p>` : ""}
         </div>
       </div>
       <div class="panel">
@@ -917,8 +1070,7 @@ function renderAnalysis() {
           </div>
         </div>
         <div class="result-list">
-          ${reminder("专业选修缺少 8 学分", "建议优先选择数据库系统实践、人工智能导论等方向课程。", "warning")}
-          ${reminder("实践环节缺少 2 学分", "可通过科研训练或学院认定竞赛补足。", "success")}
+          ${renderAnalysisSuggestions()}
         </div>
       </div>
       <div class="panel">
@@ -928,10 +1080,7 @@ function renderAnalysis() {
             <h2>最近记录</h2>
           </div>
         </div>
-        ${table(["任务号", "上传时间", "状态", "结果"], [
-          ["TR-202605-006", "2026-05-16", badge("解析成功", "success"), "2 个建议"],
-          ["TR-202604-014", "2026-04-20", badge("人工核对", "warning"), "已处理"]
-        ])}
+        ${renderTranscriptTasks()}
       </div>
     </section>
   `;
@@ -1352,9 +1501,12 @@ function actionCard(view, title, caption, iconName, tone) {
 }
 
 function renderTimeline() {
+  const timelineNodes = getProcessTimeline();
   return `
+    ${state.isProcessLoading ? `<article class="list-card"><h3>Process data is syncing</h3><p>Loading party process nodes and current student progress.</p></article>` : ""}
+    ${state.processError ? `<article class="list-card is-unread"><h3>Process API unavailable</h3><p>${escapeHtml(state.processError)}. Showing local fallback data.</p></article>` : ""}
     <div class="timeline">
-      ${processNodes.map((node) => `
+      ${timelineNodes.map((node) => `
         <div class="timeline-step ${node.status === "next" ? "is-next" : ""}">
           <span class="status-dot ${node.status === "done" ? "tone-green" : node.status === "active" ? "" : ""}">${node.status === "next" ? "" : icon(node.status === "done" ? "check" : "route")}</span>
           <strong>${node.name}</strong>
@@ -1393,6 +1545,41 @@ function renderNoticeCard(item) {
       </div>
     </article>
   `;
+}
+
+function renderAnalysisSuggestions() {
+  if (state.isAnalysisLoading) {
+    return reminder("成绩单解析中", "系统正在比对培养方案并生成缺失模块建议。", "warning");
+  }
+  if (state.analysisResult) {
+    const level = String(state.analysisResult.warning_level || "").toLowerCase();
+    const type = level === "high" ? "danger" : level === "low" ? "success" : "warning";
+    return reminder(
+      state.analysisResult.missing_module || "未命名缺失模块",
+      state.analysisResult.suggestion || "暂无建议，请联系管理员维护培养方案规则。",
+      type
+    );
+  }
+  return `
+    ${reminder("专业选修缺少 8 学分", "建议优先选择数据库系统实践、人工智能导论等方向课程。", "warning")}
+    ${reminder("实践环节缺少 2 学分", "可通过科研训练或学院认定竞赛补足。", "success")}
+  `;
+}
+
+function renderTranscriptTasks() {
+  if (state.transcriptTask) {
+    const status = state.analysisResult ? badge("解析成功", "success") : badge(state.isAnalysisLoading ? "解析中" : "待解析", "warning");
+    return table(["任务号", "上传时间", "状态", "结果"], [[
+      state.transcriptTask.transcript_id || "-",
+      String(state.transcriptTask.upload_time || "").slice(0, 10) || "-",
+      status,
+      state.analysisResult ? "1 个建议" : "等待结果"
+    ]]);
+  }
+  return table(["任务号", "上传时间", "状态", "结果"], [
+    ["TR-202605-006", "2026-05-16", badge("解析成功", "success"), "2 个建议"],
+    ["TR-202604-014", "2026-04-20", badge("人工核对", "warning"), "已处理"]
+  ]);
 }
 
 function filteredPolicies() {
@@ -1566,6 +1753,9 @@ document.addEventListener("click", async (event) => {
     if (navButton.dataset.nav === "student") {
       state.studentView = navButton.dataset.view;
       state.role = "student";
+      if (state.studentView === "process" || state.studentView === "home") {
+        await fetchProcessData({ silent: true });
+      }
     } else {
       state.adminView = navButton.dataset.view;
       state.role = "admin";
@@ -1698,6 +1888,11 @@ document.addEventListener("click", async (event) => {
     showToast(state.policyError ? "已显示当前可用知识库数据。" : "已根据关键词刷新知识库匹配结果。");
     return;
   }
+  if (action === "upload-transcript") {
+    const input = document.getElementById("transcriptFileInput");
+    if (input) input.click();
+    return;
+  }
   showToast(messages[action] || "操作已完成。");
 });
 
@@ -1707,6 +1902,14 @@ document.addEventListener("input", (event) => {
   }
   if (event.target.id === "globalSearchInput") {
     renderGlobalSearchResults();
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  if (event.target.id === "transcriptFileInput") {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    await uploadTranscriptFile(file);
   }
 });
 
