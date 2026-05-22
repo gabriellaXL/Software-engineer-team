@@ -16,6 +16,7 @@ const icons = {
   database: '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path></svg>',
   settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06A2 2 0 1 1 7.08 4.24l.06.06A1.7 1.7 0 0 0 9 4.64 1.7 1.7 0 0 0 10 3.08V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.1.33.27.64.5.9.32.37.8.57 1.28.57H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.53Z"></path></svg>',
   arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>',
+  menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg>',
   lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>'
 };
 
@@ -28,8 +29,13 @@ const state = {
   adminView: "dashboard",
   policyQuery: "",
   policyCategory: "全部",
+  policies: [],
+  isPolicyLoading: false,
+  policyError: "",
+  editingPolicyId: null,
   noticeFilter: "全部",
-  selectedApproval: "APP-202605-001"
+  selectedApproval: "APP-202605-001",
+  mobileMenuOpen: false
 };
 
 const params = new URLSearchParams(window.location.search);
@@ -65,7 +71,7 @@ const adminNav = [
   ["importExport", "数据导入导出", "database"]
 ];
 
-const policies = [
+const fallbackPolicies = [
   {
     title: "在读证明开具说明",
     category: "证明类",
@@ -144,6 +150,8 @@ const knowledgeRows = [
   ["成绩分析上传说明", "学业类", "草稿", "2026-05-06"]
 ];
 
+state.policies = fallbackPolicies.map(normalizePolicy);
+
 const planRows = [
   ["计算机类本科培养方案", "2024级", "已发布", "2026-04-15"],
   ["人工智能方向培养方案", "2025级", "待审核", "2026-04-12"],
@@ -161,6 +169,80 @@ function mountIcons(root = document) {
 }
 
 const API_BASE_URL = 'http://localhost:3000/api';
+
+function apiHeaders(json = false) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  return headers;
+}
+
+function normalizePolicy(item = {}) {
+  const statusText = item.status === "active" ? "启用" : item.status === "draft" ? "草稿" : (item.status || "启用");
+  const updatedAt = item.updated_at || item.update_time || item.created_at || item.create_time || "";
+  return {
+    id: item.policy_id || item.id || item.title || `POL-${Date.now()}`,
+    title: item.title || item.question || "未命名政策条目",
+    category: item.category || "未分类",
+    keywords: item.keywords || item.question || "",
+    answer: item.answer || item.content || "暂无标准答复，请联系管理员维护知识库。",
+    content: item.content || item.answer || "",
+    owner: item.owner || item.department || "学院学生工作办公室",
+    updated: updatedAt ? String(updatedAt).slice(0, 10) : "数据库记录",
+    attachment: item.attachment || item.template_name || "暂无附件",
+    status: statusText
+  };
+}
+
+async function fetchPolicies(options = {}) {
+  if (!state.token) {
+    state.policies = fallbackPolicies.map(normalizePolicy);
+    state.policyError = "";
+    return state.policies;
+  }
+
+  const params = new URLSearchParams();
+  const keyword = options.keyword ?? state.policyQuery.trim();
+  const category = options.category ?? state.policyCategory;
+  if (keyword) params.set("keyword", keyword);
+  if (category && category !== "全部") params.set("category", category);
+
+  state.isPolicyLoading = true;
+  state.policyError = "";
+  if (options.renderBefore) render();
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/policies/search?${params.toString()}`, {
+      headers: apiHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "知识库数据获取失败");
+    }
+    state.policies = (Array.isArray(data) ? data : []).map(normalizePolicy);
+    return state.policies;
+  } catch (error) {
+    state.policyError = error.message;
+    if (!state.policies.length) state.policies = fallbackPolicies.map(normalizePolicy);
+    if (!options.silent) showToast(`知识库接口异常：${error.message}`);
+    return state.policies;
+  } finally {
+    state.isPolicyLoading = false;
+  }
+}
+
+async function savePolicy(payload) {
+  const response = await fetch(`${API_BASE_URL}/policies/maintain`, {
+    method: "POST",
+    headers: apiHeaders(true),
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "知识库条目保存失败");
+  }
+  return normalizePolicy(data);
+}
 
 // Authentication API call
 async function login(accountId, password, role) {
@@ -191,6 +273,7 @@ async function login(accountId, password, role) {
     
     // Fetch profile
     await fetchProfile();
+    await fetchPolicies({ silent: true, keyword: "", category: "全部" });
 
     // Redirect to home
     if (state.role === 'admin' || state.role === 'teacher') {
@@ -381,8 +464,10 @@ function syncRoleSwitch() {
 
 function renderStudentShell() {
   return `
-    <section class="workspace student-workspace">
+    <section class="workspace student-workspace ${state.mobileMenuOpen ? "is-mobile-menu-open" : ""}">
+      ${renderMobileMenuButton("student")}
       ${renderSidebar("student")}
+      ${renderMobileMenuBackdrop()}
       <section class="content-area">
         ${renderStudentView()}
       </section>
@@ -393,13 +478,29 @@ function renderStudentShell() {
 
 function renderAdminShell() {
   return `
-    <section class="workspace admin-workspace">
+    <section class="workspace admin-workspace ${state.mobileMenuOpen ? "is-mobile-menu-open" : ""}">
+      ${renderMobileMenuButton("admin")}
       ${renderSidebar("admin")}
+      ${renderMobileMenuBackdrop()}
       <section class="content-area">
         ${renderAdminView()}
       </section>
     </section>
   `;
+}
+
+function renderMobileMenuButton(kind) {
+  const label = kind === "student" ? "学生端导航" : "后台导航";
+  return `
+    <button type="button" class="mobile-menu-button" data-action="mobile-menu-toggle" aria-expanded="${state.mobileMenuOpen}" aria-label="${label}">
+      ${icon("menu")}
+      <span>${label}</span>
+    </button>
+  `;
+}
+
+function renderMobileMenuBackdrop() {
+  return `<button type="button" class="mobile-menu-backdrop" data-action="mobile-menu-close" aria-label="关闭导航"></button>`;
 }
 
 function renderSidebar(kind) {
@@ -549,6 +650,7 @@ function renderStudentHome() {
 
 function renderConsult() {
   const categories = ["全部", "证明类", "党团类", "奖助类", "生活类"];
+  const matchedPolicies = filteredPolicies();
   return `
     ${pageHead("智能咨询", "基于政策知识库检索标准问答、附件模板和官方办理渠道。", [
       ["download-template", "下载模板", "download", "ghost-button"]
@@ -572,7 +674,7 @@ function renderConsult() {
             <p class="eyebrow">匹配结果</p>
             <h2>知识库条目</h2>
           </div>
-          <span class="badge">${filteredPolicies().length} 条</span>
+          <span class="badge">${matchedPolicies.length} 条</span>
         </div>
         <div class="result-list">
           ${renderPolicyResults()}
@@ -582,18 +684,18 @@ function renderConsult() {
         <div class="panel-head">
           <div>
             <p class="eyebrow">标准答复</p>
-            <h2>${filteredPolicies()[0]?.title || "暂无匹配"}</h2>
-            <p>${filteredPolicies()[0]?.answer || "换一个关键词试试，例如“在读证明”或“思想汇报”。"}</p>
+            <h2>${escapeHtml(matchedPolicies[0]?.title || "暂无匹配")}</h2>
+            <p>${escapeHtml(matchedPolicies[0]?.answer || "换一个关键词试试，例如“在读证明”或“思想汇报”。")}</p>
           </div>
         </div>
         <div class="template-list">
-          ${filteredPolicies().slice(0, 3).map((item) => `
+          ${matchedPolicies.slice(0, 3).map((item) => `
             <article class="list-card">
               <header>
-                <h3>${item.attachment}</h3>
-                <span class="badge neutral">${item.category}</span>
+                <h3>${escapeHtml(item.attachment)}</h3>
+                <span class="badge neutral">${escapeHtml(item.category)}</span>
               </header>
-              <p>维护部门：${item.owner} · 更新于 ${item.updated}</p>
+              <p>维护部门：${escapeHtml(item.owner)} · 更新于 ${escapeHtml(item.updated)}</p>
               <div class="toolbar">
                 <button type="button" class="secondary-button" data-action="download-template">${icon("download")}下载</button>
                 <button type="button" class="ghost-button" data-action="copy-link">${icon("file")}官方渠道</button>
@@ -943,21 +1045,53 @@ function renderUserManage() {
 }
 
 function renderKnowledgeManage() {
+  const rows = state.policies.length ? state.policies : fallbackPolicies.map(normalizePolicy);
+  const editingPolicy = rows.find((row) => row.id === state.editingPolicyId);
   return adminPageWithTable(
     "知识库管理",
     "维护政策条目、标准问答、附件模板与关键词。",
     ["批量导入", "新增条目"],
     ["标题", "分类", "状态", "更新日期", "操作"],
-    knowledgeRows.map((row) => [row[0], row[1], badge(row[2], row[2] === "启用" ? "success" : "neutral"), row[3], actionButton("编辑")]),
+    rows.map((row) => [
+      escapeHtml(row.title),
+      escapeHtml(row.category),
+      badge(escapeHtml(row.status), row.status === "启用" ? "success" : "neutral"),
+      escapeHtml(row.updated),
+      `<button type="button" class="ghost-button" data-policy-edit="${escapeHtml(row.id)}">编辑</button>`
+    ]),
     `
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">新增 / 编辑条目</p><h2>政策内容</h2></div></div>
-        <form class="form-grid" data-form="admin">
-          ${field("标题", "input", "请输入政策标题")}
-          ${field("分类", "select", ["证明类", "党团类", "奖助类", "生活类"])}
-          ${field("关键词", "input", "在读证明, 下载, 模板", true)}
-          ${field("内容", "textarea", "支持录入标准答复、注意事项、官方链接与办理说明。", true)}
-          <div class="toolbar field full"><button class="primary-button" type="submit">${icon("check")}保存条目</button></div>
+        <div class="panel-head"><div><p class="eyebrow">${editingPolicy ? "编辑条目" : "新增条目"}</p><h2>政策内容</h2></div></div>
+        <form class="form-grid" data-form="knowledge">
+          <label class="field">
+            <span>标题</span>
+            <input name="title" type="text" placeholder="请输入政策标题" value="${escapeHtml(editingPolicy?.title || "")}" required />
+          </label>
+          <label class="field">
+            <span>分类</span>
+            <select name="category" required>
+              ${["证明类", "党团类", "奖助类", "生活类", "学业类"].map((item) => `<option ${item === editingPolicy?.category ? "selected" : ""}>${item}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field full">
+            <span>关键词</span>
+            <input name="keywords" type="text" placeholder="在读证明, 下载, 模板" value="${escapeHtml(editingPolicy?.keywords || "")}" required />
+          </label>
+          <label class="field full">
+            <span>内容</span>
+            <textarea name="content" placeholder="支持录入标准答复、注意事项、官方链接与办理说明。" required>${escapeHtml(editingPolicy?.content || editingPolicy?.answer || "")}</textarea>
+          </label>
+          <label class="field full">
+            <span>状态</span>
+            <select name="status">
+              <option value="active" ${editingPolicy?.status === "启用" ? "selected" : ""}>启用</option>
+              <option value="draft" ${editingPolicy?.status === "草稿" ? "selected" : ""}>草稿</option>
+            </select>
+          </label>
+          <div class="toolbar field full">
+            ${editingPolicy ? `<button class="ghost-button" type="button" data-action="policy-form-reset">取消编辑</button>` : ""}
+            <button class="primary-button" type="submit">${icon("check")}${editingPolicy ? "保存修改" : "保存条目"}</button>
+          </div>
         </form>
       </div>
     `
@@ -1254,7 +1388,7 @@ function renderNoticeCard(item) {
 
 function filteredPolicies() {
   const query = state.policyQuery.trim().toLowerCase();
-  return policies.filter((item) => {
+  return (state.policies.length ? state.policies : fallbackPolicies.map(normalizePolicy)).filter((item) => {
     const inCategory = state.policyCategory === "全部" || item.category === state.policyCategory;
     const haystack = `${item.title} ${item.category} ${item.keywords} ${item.answer}`.toLowerCase();
     return inCategory && (!query || haystack.includes(query));
@@ -1263,20 +1397,26 @@ function filteredPolicies() {
 
 function renderPolicyResults(limit) {
   const results = filteredPolicies().slice(0, limit || filteredPolicies().length);
+  if (state.isPolicyLoading) {
+    return `<article class="list-card"><h3>正在查询知识库</h3><p>正在从后端同步政策条目，请稍候。</p></article>`;
+  }
+  if (state.policyError) {
+    return `<article class="list-card is-unread"><h3>接口暂不可用</h3><p>${escapeHtml(state.policyError)}。已保留当前可用数据用于浏览。</p></article>`;
+  }
   if (!results.length) {
     return `<article class="list-card"><h3>暂无匹配结果</h3><p>请尝试更换关键词，或联系管理员维护知识库。</p></article>`;
   }
   return results.map((item) => `
     <article class="list-card">
       <header>
-        <h3>${item.title}</h3>
-        <span class="badge">${item.category}</span>
+        <h3>${escapeHtml(item.title)}</h3>
+        <span class="badge">${escapeHtml(item.category)}</span>
       </header>
-      <p>${item.answer}</p>
+      <p>${escapeHtml(item.answer)}</p>
       <div class="list-meta">
-        <span>${item.owner}</span>
-        <span>更新于 ${item.updated}</span>
-        <span>附件：${item.attachment}</span>
+        <span>${escapeHtml(item.owner)}</span>
+        <span>更新于 ${escapeHtml(item.updated)}</span>
+        <span>附件：${escapeHtml(item.attachment)}</span>
       </div>
     </article>
   `).join("");
@@ -1350,7 +1490,7 @@ function field(label, type, value, full = false) {
 }
 
 function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (char) => ({
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
@@ -1387,11 +1527,12 @@ function renderGlobalSearchResults() {
   const input = document.getElementById("globalSearchInput");
   const results = document.getElementById("globalSearchResults");
   const query = input.value.trim().toLowerCase();
-  const matched = policies.filter((item) => `${item.title} ${item.keywords} ${item.answer}`.toLowerCase().includes(query));
-  results.innerHTML = (query ? matched : policies).map((item) => `
+  const source = state.policies.length ? state.policies : fallbackPolicies.map(normalizePolicy);
+  const matched = source.filter((item) => `${item.title} ${item.keywords} ${item.answer}`.toLowerCase().includes(query));
+  results.innerHTML = (query ? matched : source).map((item) => `
     <article class="list-card">
-      <header><h3>${item.title}</h3>${badge(item.category, "neutral")}</header>
-      <p>${item.answer}</p>
+      <header><h3>${escapeHtml(item.title)}</h3>${badge(escapeHtml(item.category), "neutral")}</header>
+      <p>${escapeHtml(item.answer)}</p>
       <div class="toolbar">
         <button class="secondary-button" data-action="go-consult">${icon("message")}进入咨询</button>
         <button class="ghost-button" data-action="download-template">${icon("download")}下载附件</button>
@@ -1400,7 +1541,7 @@ function renderGlobalSearchResults() {
   `).join("") || `<article class="list-card"><h3>暂无结果</h3><p>请换一个关键词。</p></article>`;
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const roleButton = event.target.closest("[data-role]");
   if (roleButton) {
     state.role = roleButton.dataset.role;
@@ -1419,7 +1560,11 @@ document.addEventListener("click", (event) => {
     } else {
       state.adminView = navButton.dataset.view;
       state.role = "admin";
+      if (state.adminView === "knowledge") {
+        await fetchPolicies({ silent: true, keyword: "", category: "全部" });
+      }
     }
+    state.mobileMenuOpen = false;
     render();
     return;
   }
@@ -1436,7 +1581,16 @@ document.addEventListener("click", (event) => {
   const policyCategory = event.target.closest("[data-policy-category]");
   if (policyCategory) {
     state.policyCategory = policyCategory.dataset.policyCategory;
+    await fetchPolicies({ silent: true });
     render();
+    return;
+  }
+
+  const policyEdit = event.target.closest("[data-policy-edit]");
+  if (policyEdit) {
+    state.editingPolicyId = policyEdit.dataset.policyEdit;
+    render();
+    showToast("已载入该政策条目，可在右侧表单维护。");
     return;
   }
 
@@ -1475,8 +1629,23 @@ document.addEventListener("click", (event) => {
     openQuickSearch();
     return;
   }
+  if (action === "mobile-menu-toggle") {
+    state.mobileMenuOpen = !state.mobileMenuOpen;
+    render();
+    return;
+  }
+  if (action === "mobile-menu-close") {
+    state.mobileMenuOpen = false;
+    render();
+    return;
+  }
   if (action === "close-modal") {
     closeModal();
+    return;
+  }
+  if (action === "policy-form-reset" || action === "知识库管理-primary") {
+    state.editingPolicyId = null;
+    render();
     return;
   }
   // === 第三步：处理退出登录 ===
@@ -1484,6 +1653,8 @@ document.addEventListener("click", (event) => {
     state.isAuthenticated = false;
     state.token = null;
     state.userProfile = null;
+    state.mobileMenuOpen = false;
+    state.editingPolicyId = null;
     localStorage.removeItem('sds_token');
     render();
     showToast("已安全退出");
@@ -1508,7 +1679,14 @@ document.addEventListener("click", (event) => {
     state.role = "student";
     state.studentView = "consult";
     state.policyQuery = document.getElementById("globalSearchInput").value;
+    await fetchPolicies({ silent: true });
     render();
+    return;
+  }
+  if (action === "policy-search") {
+    await fetchPolicies({ silent: false, renderBefore: true });
+    render();
+    showToast(state.policyError ? "已显示当前可用知识库数据。" : "已根据关键词刷新知识库匹配结果。");
     return;
   }
   showToast(messages[action] || "操作已完成。");
@@ -1527,6 +1705,36 @@ document.addEventListener("submit", async (event) => {
   const form = event.target.closest("form");
   if (!form) return;
   event.preventDefault();
+
+  if (form.dataset.form === "knowledge") {
+    const formData = new FormData(form);
+    const payload = {
+      title: formData.get("title")?.toString().trim(),
+      category: formData.get("category")?.toString(),
+      keywords: formData.get("keywords")?.toString().trim(),
+      content: formData.get("content")?.toString().trim(),
+      status: formData.get("status")?.toString() || "active"
+    };
+    if (state.editingPolicyId) {
+      payload.policy_id = state.editingPolicyId;
+    }
+    if (!payload.title || !payload.keywords || !payload.content) {
+      showToast("请完整填写标题、关键词和内容。");
+      return;
+    }
+    try {
+      await savePolicy(payload);
+      await fetchPolicies({ silent: true, keyword: "", category: "全部" });
+      state.editingPolicyId = null;
+      form.reset();
+      state.adminView = "knowledge";
+      render();
+      showToast("知识库条目已保存并刷新。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
 
   // === 第三步：绑定开门逻辑（向后端发送登录请求） ===
   if (form.id === "loginForm") {
@@ -1563,6 +1771,11 @@ document.addEventListener("submit", async (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (state.mobileMenuOpen) {
+      state.mobileMenuOpen = false;
+      render();
+      return;
+    }
     closeModal();
   }
 });
