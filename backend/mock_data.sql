@@ -26,7 +26,7 @@ INSERT INTO student_process_record (record_id, student_id, node_id, status, comp
 ('REC-002', 'S001', 'NODE-002', 'Completed', TIMESTAMP '2026-04-02 15:10:00'),
 ('REC-003', 'S001', 'NODE-003', 'InProgress', NULL);
 
--- 鎻掑叆閫氱煡涓庡熀纭€绠＄悊娴嬭瘯鏁版嵁
+-- 插入通知与基础管理测试数据
 INSERT INTO notice (notice_id, title, target, content, type, publish_time, status) VALUES
 ('N-001', '就业办：春招信息汇总', '毕业生、就业标签', '新增 14 条岗位信息，含校友企业内推与学院专场宣讲。', '就业', TIMESTAMP '2026-05-16 09:00:00', 'published'),
 ('N-002', '党建办：思想汇报提交提醒', '入党积极分子', '培养考察节点将在 2026-05-18 到期，请及时上传附件。', '党团', TIMESTAMP '2026-05-15 17:30:00', 'published'),
