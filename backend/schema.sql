@@ -107,3 +107,36 @@ CREATE TABLE analysis_result (
     suggestion TEXT,
     warning_level VARCHAR(20)
 );
+
+CREATE TABLE notice (
+    notice_id VARCHAR(50) PRIMARY KEY,
+    title VARCHAR(200),
+    target VARCHAR(100),
+    content TEXT,
+    type VARCHAR(50),
+    publish_time TIMESTAMP,
+    status VARCHAR(20)
+);
+
+CREATE TABLE notice_delivery (
+    delivery_id VARCHAR(50) PRIMARY KEY,
+    notice_id VARCHAR(50) REFERENCES notice(notice_id),
+    student_id VARCHAR(50) REFERENCES student_profile(student_id),
+    read_status VARCHAR(20)
+);
+
+CREATE TABLE training_plan (
+    plan_id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(200),
+    grade VARCHAR(20),
+    major VARCHAR(100),
+    status VARCHAR(20),
+    updated_at TIMESTAMP
+);
+
+CREATE TABLE course_requirement (
+    requirement_id VARCHAR(50) PRIMARY KEY,
+    plan_id VARCHAR(50) REFERENCES training_plan(plan_id),
+    module_name VARCHAR(100),
+    credit_required INTEGER
+);

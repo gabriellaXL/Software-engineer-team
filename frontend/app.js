@@ -42,6 +42,10 @@ const state = {
   analysisResult: null,
   isAnalysisLoading: false,
   analysisError: "",
+  notices: [],
+  users: [],
+  planRows: [],
+  basicError: "",
   noticeFilter: "全部",
   selectedApproval: "APP-202605-001",
   mobileMenuOpen: false
@@ -184,6 +188,12 @@ function apiHeaders(json = false) {
   if (json) headers["Content-Type"] = "application/json";
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   return headers;
+}
+
+function saveCurrentView() {
+  localStorage.setItem('sds_role', state.role || '');
+  localStorage.setItem('sds_student_view', state.studentView || 'home');
+  localStorage.setItem('sds_admin_view', state.adminView || 'dashboard');
 }
 
 function normalizePolicy(item = {}) {
@@ -347,6 +357,10 @@ async function uploadTranscriptFile(file) {
   if (!state.token) throw new Error("请先登录后再上传成绩单");
   if (!file) throw new Error("请选择需要上传的成绩单文件");
 
+  state.role = "student";
+  state.studentView = "analysis";
+  saveCurrentView();
+
   const formData = new FormData();
   formData.append("file", file);
 
@@ -366,6 +380,9 @@ async function uploadTranscriptFile(file) {
 
     state.transcriptTask = data;
     state.transcriptId = data.transcript_id;
+    localStorage.setItem('sds_last_transcript_id', data.transcript_id);
+    state.studentView = "analysis";
+    saveCurrentView();
     await waitForAnalysisResult(data.transcript_id);
     showToast("成绩单解析完成，已刷新分析结果。");
   } catch (error) {
@@ -374,6 +391,39 @@ async function uploadTranscriptFile(file) {
   } finally {
     state.isAnalysisLoading = false;
     render();
+  }
+}
+
+async function fetchBasicData(options = {}) {
+  if (!state.token) {
+    state.notices = [];
+    state.users = [];
+    state.planRows = [];
+    return;
+  }
+
+  try {
+    const requests = [
+      fetch(`${API_BASE_URL}/basic/notices`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/basic/plans`, { headers: apiHeaders() })
+    ];
+    if (state.role !== "student" && state.role !== "student_leader") {
+      requests.push(fetch(`${API_BASE_URL}/basic/users`, { headers: apiHeaders() }));
+    }
+
+    const responses = await Promise.all(requests);
+    const payloads = await Promise.all(responses.map((response) => response.json()));
+    responses.forEach((response, index) => {
+      if (!response.ok) throw new Error(payloads[index].error || "基础管理数据获取失败");
+    });
+
+    state.notices = Array.isArray(payloads[0]) ? payloads[0] : [];
+    state.planRows = Array.isArray(payloads[1]) ? payloads[1] : [];
+    state.users = Array.isArray(payloads[2]) ? payloads[2] : [];
+    state.basicError = "";
+  } catch (error) {
+    state.basicError = error.message;
+    if (!options.silent) showToast(`基础管理接口异常：${error.message}`);
   }
 }
 
@@ -416,6 +466,7 @@ async function login(accountId, password, role) {
     
     // You can optionally save to localStorage to persist login
     localStorage.setItem('sds_token', data.token);
+    localStorage.setItem('sds_user', JSON.stringify(data.user));
     
     // Fetch profile
     await fetchProfile();
@@ -423,6 +474,7 @@ async function login(accountId, password, role) {
     if (state.role === "student" || state.role === "student_leader") {
       await fetchProcessData({ silent: true });
     }
+    await fetchBasicData({ silent: true });
 
     // Redirect to home
     if (state.role === 'admin' || state.role === 'teacher') {
@@ -430,6 +482,7 @@ async function login(accountId, password, role) {
     } else {
       state.studentView = 'home';
     }
+    saveCurrentView();
     
     render();
     return true;
@@ -719,6 +772,7 @@ function renderStudentView() {
 }
 
 function renderStudentHome() {
+  const noticeRows = state.notices.length ? state.notices : notices;
   return `
     ${pageHead("上午好，张同学", "待办 2 项 · 未读通知 2 条 · 当前党团阶段：入党积极分子培养", [
       ["quick-search", "检索政策", "search", "ghost-button"],
@@ -790,7 +844,7 @@ function renderStudentHome() {
           <button class="ghost-button" type="button" data-nav="student" data-view="notices">${icon("bell")}全部通知</button>
         </div>
         <div class="notice-list">
-          ${notices.slice(0, 3).map(renderNoticeCard).join("")}
+          ${noticeRows.slice(0, 3).map(renderNoticeCard).join("")}
         </div>
       </div>
     </section>
@@ -923,7 +977,8 @@ function renderProcess() {
 
 function renderNotices() {
   const types = ["全部", "就业", "党团", "生活"];
-  const rows = state.noticeFilter === "全部" ? notices : notices.filter((item) => item.type === state.noticeFilter);
+  const noticeRows = state.notices.length ? state.notices : notices;
+  const rows = state.noticeFilter === "全部" ? noticeRows : noticeRows.filter((item) => item.type === state.noticeFilter);
   return `
     ${pageHead("通知公告", "根据学生画像和标签精准推送，支持未读筛选与节点提醒。", [
       ["mark-all-read", "全部已读", "check", "ghost-button"]
@@ -1131,6 +1186,7 @@ function renderAdminView() {
 }
 
 function renderAdminDashboard() {
+  const noticeRows = state.notices.length ? state.notices : notices;
   return `
     ${pageHead("后台首页", "面向老师与管理人员的维护、审核、配置和批量数据处理工作台。", [
       ["new-notice", "新建通知", "plus", "primary-button"]
@@ -1161,7 +1217,7 @@ function renderAdminDashboard() {
             </div>
           </div>
           <div class="notice-list">
-            ${notices.slice(0, 2).map(renderNoticeCard).join("")}
+            ${noticeRows.slice(0, 2).map(renderNoticeCard).join("")}
           </div>
         </div>
         <div class="panel">
@@ -1182,12 +1238,13 @@ function renderAdminDashboard() {
 }
 
 function renderUserManage() {
+  const userRows = state.users.length ? state.users : users;
   return adminPageWithTable(
     "用户管理",
     "统一维护学生、老师与 4 级权限体系。",
     ["导出名单", "新建用户"],
     ["账号", "姓名", "角色", "组织/专业", "状态"],
-    users.map((row) => [row[0], row[1], badge(row[2], row[2] === "普通学生" ? "neutral" : "success"), row[3], badge(row[4], "success")]),
+    userRows.map((row) => [row[0], row[1], badge(row[2], row[2] === "普通学生" ? "neutral" : "success"), row[3], badge(row[4], "success")]),
     `
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">权限配置</p><h2>角色资源授权</h2></div></div>
@@ -1265,7 +1322,7 @@ function renderNoticeManage() {
     <section class="grid two">
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">通知录入</p><h2>发布内容</h2></div></div>
-        <form class="form-grid" data-form="admin">
+        <form class="form-grid" data-form="notice">
           ${field("通知标题", "input", "请输入通知标题", true)}
           ${field("通知内容", "textarea", "支持录入通知正文、截止时间、链接和注意事项。", true)}
           <label class="field full"><span>标签设置</span><div class="chip-row"><button type="button" class="chip is-active">就业</button><button type="button" class="chip is-active">党团</button><button type="button" class="chip">后勤</button><button type="button" class="chip">毕业生</button></div></label>
@@ -1393,12 +1450,13 @@ function renderTemplateManage() {
 }
 
 function renderTrainingManage() {
+  const rows = state.planRows.length ? state.planRows : planRows;
   return adminPageWithTable(
     "培养方案",
     "维护专业培养方案、课程模块要求和学分比对规则。",
     ["导入方案", "新建方案"],
     ["方案名称", "适用年级", "状态", "最近更新", "操作"],
-    planRows.map((row) => [row[0], row[1], badge(row[2], row[2] === "已发布" ? "success" : row[2] === "待审核" ? "warning" : "neutral"), row[3], actionButton("查看详情")]),
+    rows.map((row) => [row[0], row[1], badge(row[2], row[2] === "已发布" ? "success" : row[2] === "待审核" ? "warning" : "neutral"), row[3], actionButton("查看详情")]),
     `
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">课程模块</p><h2>学分要求</h2></div></div>
@@ -1547,6 +1605,67 @@ function renderNoticeCard(item) {
   `;
 }
 
+async function bootstrapSession() {
+  const savedToken = localStorage.getItem('sds_token');
+  if (!savedToken) {
+    render();
+    return;
+  }
+
+  state.token = savedToken;
+  state.isAuthenticated = true;
+
+  try {
+    const savedUser = JSON.parse(localStorage.getItem('sds_user') || 'null');
+    if (savedUser) {
+      state.user = savedUser;
+      state.role = savedUser.role === 'student' ? 'student' : 'admin';
+    }
+    const savedRole = localStorage.getItem('sds_role');
+    const savedStudentView = localStorage.getItem('sds_student_view');
+    const savedAdminView = localStorage.getItem('sds_admin_view');
+
+    await fetchProfile();
+    if (!state.role && state.userProfile?.role) {
+      state.role = state.userProfile.role === 'student' ? 'student' : 'admin';
+    }
+    if (savedRole === 'student' || savedRole === 'admin') state.role = savedRole;
+    if (!state.role) state.role = params.get("role") === "admin" ? "admin" : "student";
+
+    if (state.role === "student" || state.role === "student_leader") {
+      if (savedStudentView) {
+        state.studentView = savedStudentView;
+      }
+      if (state.studentView === "login" || state.studentView === "register") state.studentView = "home";
+      await fetchProcessData({ silent: true });
+      const lastTranscriptId = localStorage.getItem('sds_last_transcript_id');
+      if (lastTranscriptId && state.studentView === "analysis") {
+        state.transcriptTask = { transcript_id: lastTranscriptId, upload_time: "" };
+        state.transcriptId = lastTranscriptId;
+        await fetchAnalysisResult(lastTranscriptId, { allowPending: true });
+      }
+    } else {
+      state.adminView = savedAdminView || state.adminView || "dashboard";
+    }
+
+    await fetchPolicies({ silent: true, keyword: "", category: "全部" });
+    await fetchBasicData({ silent: true });
+  } catch (error) {
+    state.token = null;
+    state.isAuthenticated = false;
+    state.user = null;
+    state.userProfile = null;
+    localStorage.removeItem('sds_token');
+    localStorage.removeItem('sds_user');
+    localStorage.removeItem('sds_role');
+    localStorage.removeItem('sds_student_view');
+    localStorage.removeItem('sds_admin_view');
+    localStorage.removeItem('sds_last_transcript_id');
+  }
+
+  render();
+}
+
 function renderAnalysisSuggestions() {
   if (state.isAnalysisLoading) {
     return reminder("成绩单解析中", "系统正在比对培养方案并生成缺失模块建议。", "warning");
@@ -1673,16 +1792,24 @@ function field(label, type, value, full = false) {
     return `
       <label class="field ${full ? "full" : ""}">
         <span>${label}</span>
-        <textarea placeholder="${value}"></textarea>
+        <textarea name="${fieldName(label)}" placeholder="${value}"></textarea>
       </label>
     `;
   }
   return `
     <label class="field ${full ? "full" : ""}">
       <span>${label}</span>
-      <input type="text" placeholder="${value}" />
+      <input name="${fieldName(label)}" type="text" placeholder="${value}" />
     </label>
   `;
+}
+
+function fieldName(label) {
+  const names = {
+    "通知标题": "title",
+    "通知内容": "content",
+  };
+  return names[label] || "";
 }
 
 function escapeHtml(value) {
@@ -1756,14 +1883,21 @@ document.addEventListener("click", async (event) => {
       if (state.studentView === "process" || state.studentView === "home") {
         await fetchProcessData({ silent: true });
       }
+      if (["home", "notices"].includes(state.studentView)) {
+        await fetchBasicData({ silent: true });
+      }
     } else {
       state.adminView = navButton.dataset.view;
       state.role = "admin";
       if (state.adminView === "knowledge") {
         await fetchPolicies({ silent: true, keyword: "", category: "全部" });
       }
+      if (["dashboard", "users", "noticeManage", "training"].includes(state.adminView)) {
+        await fetchBasicData({ silent: true });
+      }
     }
     state.mobileMenuOpen = false;
+    saveCurrentView();
     render();
     return;
   }
@@ -1851,10 +1985,16 @@ document.addEventListener("click", async (event) => {
   if (action === "logout") {
     state.isAuthenticated = false;
     state.token = null;
+    state.user = null;
     state.userProfile = null;
     state.mobileMenuOpen = false;
     state.editingPolicyId = null;
     localStorage.removeItem('sds_token');
+    localStorage.removeItem('sds_user');
+    localStorage.removeItem('sds_role');
+    localStorage.removeItem('sds_student_view');
+    localStorage.removeItem('sds_admin_view');
+    localStorage.removeItem('sds_last_transcript_id');
     render();
     showToast("已安全退出");
     return;
@@ -1862,6 +2002,7 @@ document.addEventListener("click", async (event) => {
   if (action === "student-new-application") {
     state.studentView = "applications";
     state.role = "student";
+    saveCurrentView();
     render();
     showToast(messages[action]);
     return;
@@ -1869,6 +2010,7 @@ document.addEventListener("click", async (event) => {
   if (action === "new-notice") {
     state.adminView = "noticeManage";
     state.role = "admin";
+    saveCurrentView();
     render();
     showToast("已进入通知管理。");
     return;
@@ -1877,6 +2019,7 @@ document.addEventListener("click", async (event) => {
     closeModal();
     state.role = "student";
     state.studentView = "consult";
+    saveCurrentView();
     state.policyQuery = document.getElementById("globalSearchInput").value;
     await fetchPolicies({ silent: true });
     render();
@@ -1948,6 +2091,37 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (form.dataset.form === "notice") {
+    const formData = new FormData(form);
+    const payload = {
+      title: formData.get("title")?.toString().trim(),
+      content: formData.get("content")?.toString().trim(),
+      target: "全体学生",
+      type: "综合",
+      status: "published"
+    };
+    if (!payload.title || !payload.content) {
+      showToast("请填写通知标题和内容。");
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/basic/notices`, {
+        method: "POST",
+        headers: apiHeaders(true),
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "通知发布失败");
+      await fetchBasicData({ silent: true });
+      form.reset();
+      render();
+      showToast("通知已发布并刷新列表。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+
   // === 第三步：绑定开门逻辑（向后端发送登录请求） ===
   if (form.id === "loginForm") {
     const accountId = document.getElementById("accountId").value;
@@ -1963,12 +2137,21 @@ document.addEventListener("submit", async (event) => {
       // 后端验证通过了！给了我们通行证（token）和用户信息
       state.token = data.token;
       state.user = data.user;
-      state.isLoggedIn = true;
+      state.isAuthenticated = true;
       state.role = data.user.role === 'student' ? 'student' : 'admin';
+      state.studentView = state.role === 'student' ? 'home' : state.studentView;
+      state.adminView = state.role === 'admin' ? 'dashboard' : state.adminView;
+      saveCurrentView();
       
       // 存到浏览器的兜里，刷新页面也不会掉
       localStorage.setItem('sds_token', data.token);
       localStorage.setItem('sds_user', JSON.stringify(data.user));
+      await fetchProfile();
+      await fetchPolicies({ silent: true, keyword: "", category: "全部" });
+      if (state.role === "student" || state.role === "student_leader") {
+        await fetchProcessData({ silent: true });
+      }
+      await fetchBasicData({ silent: true });
       
       showToast("登录成功！");
       render(); // 重新画出界面（这次就会显示真正的系统界面了）
@@ -1993,4 +2176,4 @@ document.addEventListener("keydown", (event) => {
 });
 
 mountIcons();
-render();
+bootstrapSession();
