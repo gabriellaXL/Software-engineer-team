@@ -29,6 +29,10 @@ function mapNotice(row) {
   };
 }
 
+function statusToText(status) {
+  return status === 'active' ? '启用' : '停用';
+}
+
 function mapUser(row) {
   const roleName = {
     student: '普通学生',
@@ -37,13 +41,24 @@ function mapUser(row) {
     leader: '学院领导',
   }[row.role] || row.role;
 
-  return [
-    row.account_id,
-    row.name || row.account_id,
+  return {
+    id: row.user_id,
+    accountId: row.account_id,
+    account_id: row.account_id,
+    name: row.name || row.account_id,
+    role: row.role,
     roleName,
-    row.organization || '-',
-    row.status === 'active' ? '启用' : '停用',
-  ];
+    organization: row.organization || '-',
+    status: row.status,
+    statusText: statusToText(row.status),
+    row: [
+      row.account_id,
+      row.name || row.account_id,
+      roleName,
+      row.organization || '-',
+      statusToText(row.status),
+    ],
+  };
 }
 
 function mapPlan(row) {
@@ -53,12 +68,21 @@ function mapPlan(row) {
     draft: '草稿',
   }[row.status] || row.status;
 
-  return [
-    row.name,
-    row.grade,
+  return {
+    id: row.plan_id,
+    name: row.name,
+    grade: row.grade,
+    major: row.major,
+    status: row.status,
     statusName,
-    formatDate(row.updated_at),
-  ];
+    updatedAt: formatDate(row.updated_at),
+    row: [
+      row.name,
+      row.grade,
+      statusName,
+      formatDate(row.updated_at),
+    ],
+  };
 }
 
 exports.getNotices = async (req, res) => {
@@ -105,10 +129,47 @@ exports.createNotice = async (req, res) => {
   }
 };
 
+exports.updateNotice = async (req, res) => {
+  const { noticeId } = req.params;
+  const { title, content, target, type, status } = req.body;
+
+  try {
+    const { rows } = await db.query(
+      `UPDATE notice
+       SET title = COALESCE($1, title),
+           content = COALESCE($2, content),
+           target = COALESCE($3, target),
+           type = COALESCE($4, type),
+           status = COALESCE($5, status)
+       WHERE notice_id = $6
+       RETURNING *`,
+      [title, content, target, type, status, noticeId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Notice not found' });
+    res.json(mapNotice(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.deleteNotice = async (req, res) => {
+  const { noticeId } = req.params;
+
+  try {
+    await db.query('DELETE FROM notice_delivery WHERE notice_id = $1', [noticeId]);
+    const { rowCount } = await db.query('DELETE FROM notice WHERE notice_id = $1', [noticeId]);
+    if (!rowCount) return res.status(404).json({ error: 'Notice not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.getUsers = async (req, res) => {
   try {
     const { rows } = await db.query(`
       SELECT
+        u.user_id,
         u.account_id,
         u.role,
         u.status,
@@ -128,10 +189,202 @@ exports.getUsers = async (req, res) => {
   }
 };
 
+exports.createUser = async (req, res) => {
+  const {
+    accountId,
+    account_id: accountIdAlias,
+    password,
+    role = 'student',
+    status = 'active',
+    name,
+    major,
+    grade,
+    phone,
+    department,
+  } = req.body;
+  const resolvedAccountId = accountId || accountIdAlias;
+  if (!resolvedAccountId || !password) {
+    return res.status(400).json({ error: 'Account and password are required' });
+  }
+
+  const userId = `U-${Date.now()}`;
+  try {
+    await db.query('BEGIN');
+    const { rows } = await db.query(
+      'INSERT INTO tb_user (user_id, role, account_id, password, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [userId, role, resolvedAccountId, password, status]
+    );
+
+    if (role === 'student' || role === 'student_leader') {
+      const studentId = `S-${Date.now()}`;
+      await db.query(
+        'INSERT INTO student_profile (student_id, user_id, student_no, name, major, grade, phone) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [studentId, userId, resolvedAccountId, name || resolvedAccountId, major || '', grade || '', phone || '']
+      );
+    } else {
+      const adminId = `A-${Date.now()}`;
+      await db.query(
+        'INSERT INTO admin_profile (admin_id, user_id, name, department, role) VALUES ($1, $2, $3, $4, $5)',
+        [adminId, userId, name || resolvedAccountId, department || '', role]
+      );
+    }
+
+    await db.query('COMMIT');
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.updateUser = async (req, res) => {
+  const { userId } = req.params;
+  const { role, status, password, name, major, grade, phone, department } = req.body;
+
+  try {
+    await db.query('BEGIN');
+    const { rows } = await db.query(
+      `UPDATE tb_user
+       SET role = COALESCE($1, role),
+           status = COALESCE($2, status),
+           password = COALESCE($3, password)
+       WHERE user_id = $4
+       RETURNING *`,
+      [role, status, password, userId]
+    );
+    if (!rows.length) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    await db.query(
+      `UPDATE student_profile
+       SET name = COALESCE($1, name),
+           major = COALESCE($2, major),
+           grade = COALESCE($3, grade),
+           phone = COALESCE($4, phone)
+       WHERE user_id = $5`,
+      [name, major, grade, phone, userId]
+    );
+    await db.query(
+      `UPDATE admin_profile
+       SET name = COALESCE($1, name),
+           department = COALESCE($2, department),
+           role = COALESCE($3, role)
+       WHERE user_id = $4`,
+      [name, department, role, userId]
+    );
+
+    await db.query('COMMIT');
+    res.json(rows[0]);
+  } catch (err) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.deleteUser = async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    await db.query('BEGIN');
+    await db.query('DELETE FROM admin_profile WHERE user_id = $1', [userId]);
+    const { rows: studentRows } = await db.query('SELECT student_id FROM student_profile WHERE user_id = $1', [userId]);
+    for (const student of studentRows) {
+      const { rows: applicationRows } = await db.query(
+        'SELECT application_id FROM application WHERE student_id = $1',
+        [student.student_id]
+      );
+      for (const application of applicationRows) {
+        await db.query('DELETE FROM approval_record WHERE application_id = $1', [application.application_id]);
+        await db.query('DELETE FROM certificate WHERE application_id = $1', [application.application_id]);
+      }
+      const { rows: transcriptRows } = await db.query(
+        'SELECT transcript_id FROM transcript_task WHERE student_id = $1',
+        [student.student_id]
+      );
+      for (const transcript of transcriptRows) {
+        await db.query('DELETE FROM analysis_result WHERE transcript_id = $1', [transcript.transcript_id]);
+      }
+      await db.query('DELETE FROM notice_delivery WHERE student_id = $1', [student.student_id]);
+      await db.query('DELETE FROM student_process_record WHERE student_id = $1', [student.student_id]);
+      await db.query('DELETE FROM transcript_task WHERE student_id = $1', [student.student_id]);
+      await db.query('DELETE FROM application WHERE student_id = $1', [student.student_id]);
+    }
+    await db.query('DELETE FROM student_profile WHERE user_id = $1', [userId]);
+    const { rowCount } = await db.query('DELETE FROM tb_user WHERE user_id = $1', [userId]);
+    if (!rowCount) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+    await db.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.getPlans = async (req, res) => {
   try {
     const { rows } = await db.query('SELECT * FROM training_plan ORDER BY updated_at DESC');
     res.json(rows.map(mapPlan));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.createPlan = async (req, res) => {
+  const { name, grade, major, status = 'draft' } = req.body;
+  if (!name || !grade) {
+    return res.status(400).json({ error: 'Plan name and grade are required' });
+  }
+
+  try {
+    const planId = `PLAN-${Date.now()}`;
+    const { rows } = await db.query(
+      `INSERT INTO training_plan (plan_id, name, grade, major, status, updated_at)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [planId, name, grade, major || '', status]
+    );
+    res.status(201).json(mapPlan(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.updatePlan = async (req, res) => {
+  const { planId } = req.params;
+  const { name, grade, major, status } = req.body;
+
+  try {
+    const { rows } = await db.query(
+      `UPDATE training_plan
+       SET name = COALESCE($1, name),
+           grade = COALESCE($2, grade),
+           major = COALESCE($3, major),
+           status = COALESCE($4, status),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE plan_id = $5
+       RETURNING *`,
+      [name, grade, major, status, planId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Training plan not found' });
+    res.json(mapPlan(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.deletePlan = async (req, res) => {
+  const { planId } = req.params;
+
+  try {
+    await db.query('DELETE FROM course_requirement WHERE plan_id = $1', [planId]);
+    const { rowCount } = await db.query('DELETE FROM training_plan WHERE plan_id = $1', [planId]);
+    if (!rowCount) return res.status(404).json({ error: 'Training plan not found' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

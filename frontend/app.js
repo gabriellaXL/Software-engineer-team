@@ -418,8 +418,12 @@ async function fetchBasicData(options = {}) {
     });
 
     state.notices = Array.isArray(payloads[0]) ? payloads[0] : [];
-    state.planRows = Array.isArray(payloads[1]) ? payloads[1] : [];
-    state.users = Array.isArray(payloads[2]) ? payloads[2] : [];
+    state.planRows = Array.isArray(payloads[1])
+      ? payloads[1].map((item) => item.row || [item.name, item.grade, item.statusName || item.status, item.updatedAt])
+      : [];
+    state.users = Array.isArray(payloads[2])
+      ? payloads[2].map((item) => item.row || [item.accountId || item.account_id, item.name, item.roleName || item.role, item.organization, item.statusText || item.status])
+      : [];
     state.basicError = "";
   } catch (error) {
     state.basicError = error.message;
@@ -1080,6 +1084,7 @@ function renderApplications() {
 }
 
 function renderAnalysis() {
+  const analysisCredits = getAnalysisCredits();
   return `
     ${pageHead("成绩分析", "上传成绩单后与培养方案自动比对，生成缺失模块、学分达成度和选课建议。", [
       ["upload-transcript", "上传成绩单", "upload", "primary-button"]
@@ -1112,7 +1117,7 @@ function renderAnalysis() {
           </div>
         </div>
         <div class="credit-grid">
-          ${credits.map((item) => creditRow(item)).join("")}
+          ${analysisCredits.map((item) => creditRow(item)).join("")}
         </div>
       </div>
     </section>
@@ -1683,6 +1688,17 @@ function renderAnalysisSuggestions() {
     ${reminder("专业选修缺少 8 学分", "建议优先选择数据库系统实践、人工智能导论等方向课程。", "warning")}
     ${reminder("实践环节缺少 2 学分", "可通过科研训练或学院认定竞赛补足。", "success")}
   `;
+}
+
+function getAnalysisCredits() {
+  const moduleProgress = state.analysisResult?.module_progress || state.analysisResult?.moduleProgress;
+  if (!Array.isArray(moduleProgress) || !moduleProgress.length) return credits;
+  return moduleProgress.map((item) => ({
+    name: item.name || item.module_name || '未命名模块',
+    done: Number(item.done || item.credit_done || 0),
+    total: Number(item.total || item.credit_required || 0),
+    tone: item.tone || 'green',
+  }));
 }
 
 function renderTranscriptTasks() {
