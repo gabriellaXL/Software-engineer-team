@@ -10,8 +10,17 @@
 * **数据库**：人大金仓 KingbaseES（使用 `pg` 驱动进行连接）
 * **接口规范**：RESTful API
 * **认证方式**：JWT (JSON Web Token) 校验
+* **第三方依赖服务**：Gotenberg (用于将 DOCX 模板转换为 PDF)
 
 ## 2. 本地运行步骤
+
+### 2.0 启动 Gotenberg 服务 (PDF转换依赖)
+本项目在处理“证明申请”模块时，需要将填好数据的 Word (.docx) 文件转换为 PDF 进行在线预览。我们使用了开源的 Gotenberg 服务来实现此功能。
+请在运行后端服务前，确保你的电脑已安装 Docker，并开启一个新的终端执行以下命令来启动 Gotenberg 容器：
+```bash
+docker run --rm -p 3001:3000 gotenberg/gotenberg:8
+```
+*(注：Gotenberg 容器启动后，会监听本地的 3001 端口，后端服务会自动将文件发送至此端口进行转换。)*
 
 ### 2.1 安装依赖
 请确保你的电脑上已经安装了 Node.js。在终端中进入 `backend` 目录并安装所需依赖：

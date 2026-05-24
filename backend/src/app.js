@@ -7,6 +7,7 @@ const processRoutes = require('./routes/processRoutes');
 const applicationRoutes = require('./routes/applicationRoutes');
 const certificateRoutes = require('./routes/certificateRoutes');
 const analysisRoutes = require('./routes/analysisRoutes');
+const templateRoutes = require('./routes/templateRoutes');
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use('/api/process', processRoutes);
 app.use('/api/applications', applicationRoutes);
 app.use('/api/certificates', certificateRoutes);
 app.use('/api/analysis', analysisRoutes);
+app.use('/api/templates', templateRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

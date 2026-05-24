@@ -93,3 +93,30 @@ exports.getProfile = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.updateProfile = async (req, res) => {
+  try {
+    const { userId, role } = req.user;
+    if (role !== 'student' && role !== 'student_leader') {
+      return res.status(403).json({ error: '仅学生可更新档案' });
+    }
+
+    const { name, id_card, gender, phone, email, join_party_date } = req.body;
+    
+    const { rows } = await db.query(
+      `UPDATE student_profile 
+       SET name = COALESCE($1, name),
+           id_card = COALESCE($2, id_card),
+           gender = COALESCE($3, gender),
+           phone = COALESCE($4, phone),
+           email = COALESCE($5, email),
+           join_party_date = COALESCE($6, join_party_date)
+       WHERE user_id = $7 RETURNING *`,
+      [name, id_card, gender, phone, email, join_party_date, userId]
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

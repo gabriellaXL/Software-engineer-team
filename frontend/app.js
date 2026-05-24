@@ -26,15 +26,19 @@ const state = {
   token: null,
   userProfile: null,
   studentView: "login", // Start at login view
+  studentAppView: "list", // "list", "new", "profile"
   adminView: "dashboard",
   policyQuery: "",
   policyCategory: "全部",
   policies: [],
+  templates: [], // fetched templates
   isPolicyLoading: false,
   policyError: "",
   editingPolicyId: null,
   noticeFilter: "全部",
   selectedApproval: "APP-202605-001",
+  adminApprovalView: "list",
+  approvalFilter: "全部",
   mobileMenuOpen: false
 };
 
@@ -303,6 +307,460 @@ async function fetchProfile() {
   } catch (error) {
     console.error('Failed to fetch profile', error);
   }
+}
+
+async function fetchTemplates() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/templates`, { headers: apiHeaders() });
+    if (res.ok) {
+      state.templates = await res.json();
+    }
+  } catch(e) {
+    console.error("fetch templates failed", e);
+  }
+}
+
+window.handleTemplateSelect = async function() {
+  const select = document.getElementById("appTemplateSelect");
+  const container = document.getElementById("dynamic-fields-container");
+  if (container) container.innerHTML = '';
+
+  if (!select || !select.value) return;
+
+  const template = state.templates.find(t => String(t.id) === select.value);
+  if (!template || !template.file_data) return;
+
+  try {
+    const base64Data = template.file_data.split(',')[1];
+    const binaryString = atob(base64Data);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const zip = new window.PizZip(bytes);
+    const doc = new window.docxtemplater(zip, {
+        paragraphLoop: true,
+        linebreaks: true,
+    });
+    
+    // Extract text directly from document.xml to avoid parsing fragmentation
+    const xml = zip.file("word/document.xml").asText();
+    const text = xml.replace(/<[^>]+>/g, ""); // Strip all XML tags
+    const tagsMatch = text.match(/\{([^{}]+)\}/g) || [];
+    const uniqueTags = [...new Set(tagsMatch.map(t => t.slice(1, -1).trim()))];
+    console.log("解析到的 Word 标签:", uniqueTags);
+
+    const p = state.userProfile || {};
+    const profileMap = {
+      '姓名': p.name || '',
+      '学号': p.student_no || '',
+      '身份证号': p.id_card || '',
+      '性别': p.gender || '',
+      '电话': p.phone || '',
+      '电话号码': p.phone || '',
+      '邮箱': p.email || '',
+      '专业': p.major || '',
+      '年级': p.grade || '',
+      '所在院系': p.department || '信息学院'
+    };
+
+    let html = '';
+    uniqueTags.forEach(tag => {
+      // If we don't have it in profileMap, create an input field
+      if (profileMap[tag] === undefined || profileMap[tag] === '') {
+        const isLongText = tag.includes('理由') || tag.includes('说明') || tag.includes('原因') || tag.includes('内容');
+        if (isLongText) {
+          html += `
+            <label class="field full">
+              <span>${escapeHtml(tag)}</span>
+              <textarea name="dynamic_${escapeHtml(tag)}" required></textarea>
+            </label>
+          `;
+        } else {
+          html += `
+            <label class="field full">
+              <span>${escapeHtml(tag)}</span>
+              <input type="text" name="dynamic_${escapeHtml(tag)}" required />
+            </label>
+          `;
+        }
+      }
+    });
+
+    if (container) container.innerHTML = html;
+  } catch (e) {
+    console.error("解析 docx 模板失败", e);
+  }
+};
+
+window.previewFilledTemplate = async function() {
+  const select = document.getElementById("appTemplateSelect");
+  if (!select || !select.value) {
+    showToast("请先选择模板");
+    return;
+  }
+  const template = state.templates.find(t => String(t.id) === select.value);
+  if (!template || !template.file_data) {
+    showToast("无法读取模板内容");
+    return;
+  }
+
+  try {
+    const base64Data = template.file_data.split(',')[1];
+    const binaryString = atob(base64Data);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const zip = new window.PizZip(bytes);
+    const doc = new window.docxtemplater(zip, {
+        paragraphLoop: true,
+        linebreaks: true,
+    });
+
+    const p = state.userProfile || {};
+    const data = {
+      '姓名': p.name || '',
+      '学号': p.student_no || '',
+      '身份证号': p.id_card || '',
+      '性别': p.gender || '',
+      '电话': p.phone || '',
+      '电话号码': p.phone || '',
+      '邮箱': p.email || '',
+      '专业': p.major || '',
+      '年级': p.grade || '',
+      '所在院系': p.department || '信息学院'
+    };
+
+    const inputs = document.querySelectorAll('[name^="dynamic_"]');
+    inputs.forEach(input => {
+      const tag = input.name.replace('dynamic_', '');
+      data[tag] = input.value;
+    });
+
+    doc.render(data);
+
+    const out = doc.getZip().generate({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const reader = new FileReader();
+    const docxBase64 = await new Promise((resolve) => {
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(out);
+    });
+
+    showToast("正在通过服务器转换PDF，请稍候...");
+    
+    const res = await fetch(`${API_BASE_URL}/applications/convert-pdf`, {
+      method: 'POST',
+      headers: apiHeaders(true),
+      body: JSON.stringify({ docxBase64 })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || "转换PDF失败");
+    }
+
+    const { pdfDataUri } = await res.json();
+
+    const formEl = document.querySelector('form[data-form="application-new"]');
+    if (formEl) {
+      formEl.dataset.filledPdf = pdfDataUri;
+    }
+
+    const blobUrl = dataURLtoBlobURL(pdfDataUri);
+    
+    // Pop up a modal to show the PDF preview instead of inline
+    let html = `
+      <div class="modal" id="pdfPreviewModal" style="display: flex;">
+        <div class="modal-panel" style="width: 80%; max-width: 900px; height: 90vh; display: flex; flex-direction: column;">
+          <div class="modal-head">
+            <div><p class="eyebrow">预览</p><h2>生成的证明文件</h2></div>
+            <button type="button" class="icon-button" onclick="document.getElementById('pdfPreviewModal').remove()">${icon("x")}</button>
+          </div>
+          <div style="flex: 1; margin-top: 10px; background: #f1f5f9; border-radius: 6px; overflow: hidden;">
+            <iframe src="${blobUrl}#toolbar=0" width="100%" height="100%" style="border: none;"></iframe>
+          </div>
+          <div class="toolbar" style="margin-top: 20px;">
+            <button class="primary-button" onclick="document.getElementById('pdfPreviewModal').remove()">${icon("check")}确认预览并关闭</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+
+    // Also update the inline container with a friendly message
+    const container = document.getElementById("pdf-preview-container");
+    if (container) {
+      container.innerHTML = `<span style="color: var(--brand); font-weight: bold;">✅ PDF已生成完毕（如需重新查看请点击上方“预览生成的PDF”按钮）</span>`;
+    }
+    
+    showToast("模板已自动填充并生成PDF预览");
+  } catch (error) {
+    console.error(error);
+    showToast("生成PDF失败: " + error.message);
+  }
+};
+
+async function handleNewApplicationSubmit(event) {
+  event.preventDefault();
+  const form = event.target;
+  const filledPdf = form.dataset.filledPdf;
+  if (!filledPdf) {
+    showToast("请先点击预览生成的PDF");
+    return;
+  }
+  
+  const purpose = form.purpose.value;
+  const comment = form.comment.value;
+  const templateId = form.templateId.value;
+  
+  let attachmentData = null;
+  const fileInput = document.getElementById("appAttachment");
+  if (fileInput.files.length > 0) {
+    const file = fileInput.files[0];
+    if (file.size > 15 * 1024 * 1024) {
+      showToast("附件大小不能超过15MB");
+      return;
+    }
+    const reader = new FileReader();
+    attachmentData = await new Promise((resolve) => {
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  const template = state.templates.find(t => String(t.id) === templateId);
+  const dynamicFields = {};
+  form.querySelectorAll('[name^="dynamic_"]').forEach((input) => {
+    const tag = input.name.replace('dynamic_', '');
+    dynamicFields[tag] = input.value;
+  });
+
+  const payload = {
+    type: template ? template.name : '证明申请',
+    content: JSON.stringify({
+      purpose,
+      comment,
+      dynamicFields,
+      fileData: filledPdf, // the generated PDF
+      attachmentData: attachmentData, // additional attachment
+      templateId
+    })
+  };
+
+  try {
+    let res;
+    if (state.editingApplicationId) {
+      res = await fetch(`${API_BASE_URL}/applications/${state.editingApplicationId}`, {
+        method: 'PUT',
+        headers: apiHeaders(true),
+        body: JSON.stringify(payload)
+      });
+      state.editingApplicationId = null; // clear after submit
+    } else {
+      res = await fetch(`${API_BASE_URL}/applications`, {
+        method: 'POST',
+        headers: apiHeaders(true),
+        body: JSON.stringify(payload)
+      });
+    }
+    if (!res.ok) throw new Error(await res.text());
+    showToast("申请提交成功！");
+    await fetchApplications(); // Refresh applications list
+    state.studentAppView = 'list';
+    render();
+  } catch(e) {
+    showToast("提交失败: " + e.message);
+  }
+}
+
+function getDraftsStorageKey() {
+  return `sds_drafts_${state.user.user_id}`;
+}
+
+function getStoredDrafts() {
+  try {
+    return JSON.parse(localStorage.getItem(getDraftsStorageKey()) || '[]');
+  } catch (error) {
+    console.error('读取草稿箱失败', error);
+    return [];
+  }
+}
+
+function setStoredDrafts(drafts) {
+  localStorage.setItem(getDraftsStorageKey(), JSON.stringify(drafts));
+}
+
+function collectDynamicFieldValues(form) {
+  const dynamicFields = {};
+  if (!form) return dynamicFields;
+  form.querySelectorAll('[name^="dynamic_"]').forEach((input) => {
+    const tag = input.name.replace('dynamic_', '');
+    dynamicFields[tag] = input.value;
+  });
+  return dynamicFields;
+}
+
+function buildDraftRecord({ templateId = '', templateName = '未知模板', purpose = '', comment = '', dynamicFields = {} }) {
+  return {
+    id: 'draft_' + Date.now(),
+    templateId,
+    templateName,
+    purpose,
+    comment,
+    dynamicFields,
+    updatedAt: new Date().toLocaleString()
+  };
+}
+
+function saveDraftRecord(draft) {
+  const drafts = getStoredDrafts();
+  drafts.push(draft);
+  setStoredDrafts(drafts);
+}
+
+async function populateApplicationForm(record = {}, toastMessage = "已加载原申请内容，请修改后重新生成并提交") {
+  if (!state.templates.length) {
+    await fetchTemplates();
+  }
+  state.studentView = "applications";
+  state.studentAppView = "new";
+  render();
+
+  setTimeout(async () => {
+    const form = document.querySelector('form[data-form="application-new"]');
+    if (!form) return;
+
+    if (record.templateId) {
+      form.templateId.value = record.templateId;
+      await window.handleTemplateSelect();
+    }
+
+    form.purpose.value = record.purpose && record.purpose !== '无' ? record.purpose : '';
+    form.comment.value = record.comment && record.comment !== '无' ? record.comment : '';
+
+    const dynamicFields = record.dynamicFields || {};
+    form.querySelectorAll('[name^="dynamic_"]').forEach((input) => {
+      const tag = input.name.replace('dynamic_', '');
+      const value = Object.prototype.hasOwnProperty.call(dynamicFields, tag)
+        ? dynamicFields[tag]
+        : dynamicFields[input.name];
+      if (value !== undefined && value !== null) {
+        input.value = value;
+      }
+    });
+
+    form.dataset.filledPdf = '';
+    const previewContainer = document.getElementById("pdf-preview-container");
+    if (previewContainer) {
+      previewContainer.innerHTML = `<span style="color: #94a3b8;">已回填原申请内容，请重新点击“预览生成的PDF”后再提交</span>`;
+    }
+
+    showToast(toastMessage);
+  }, 100);
+}
+
+function buildDraftFromApplication(app) {
+  return buildDraftRecord({
+    templateId: app.templateId || '',
+    templateName: app.type || '未知模板',
+    purpose: app.purpose && app.purpose !== '无' ? app.purpose : '',
+    comment: app.comment && app.comment !== '无' ? app.comment : '',
+    dynamicFields: app.dynamicFields || {}
+  });
+}
+
+window.saveDraft = function() {
+  const form = document.querySelector('form[data-form="application-new"]');
+  if (!form) return;
+
+  const templateId = form.templateId.value;
+  if (!templateId) {
+    showToast("请先选择模板再保存草稿");
+    return;
+  }
+
+  const template = state.templates.find(t => String(t.id) === templateId);
+  const draft = buildDraftRecord({
+    templateId,
+    templateName: template ? template.name : '未知模板',
+    purpose: form.purpose.value,
+    comment: form.comment.value,
+    dynamicFields: collectDynamicFieldValues(form)
+  });
+
+  saveDraftRecord(draft);
+  showToast("草稿保存成功");
+};
+
+window.openDrafts = function() {
+  const drafts = getStoredDrafts();
+  
+  let html = `
+    <div class="modal" id="draftsModal" style="display: flex;">
+      <div class="modal-panel" style="width: 500px;">
+        <div class="modal-head">
+          <div><p class="eyebrow">草稿箱</p><h2>未提交的申请</h2></div>
+          <button type="button" class="icon-button" onclick="document.getElementById('draftsModal').remove()">${icon("x")}</button>
+        </div>
+        <div class="notice-list" style="margin-top: 10px; max-height: 400px; overflow-y: auto;">
+  `;
+
+  if (drafts.length === 0) {
+    html += `<p style="color:#94a3b8; padding: 20px; text-align: center;">草稿箱为空</p>`;
+  } else {
+    drafts.forEach((d, index) => {
+      html += `
+        <article class="list-card" style="margin-bottom: 10px;">
+          <header>
+            <h3>${d.templateName}</h3>
+          </header>
+          <p>更新时间：${d.updatedAt}</p>
+          <div class="toolbar" style="margin-top: 10px;">
+            <button class="secondary-button" onclick="loadDraft(${index})">${icon("check")}继续编辑</button>
+            <button class="ghost-button" onclick="deleteDraft(${index})">${icon("x")}删除</button>
+          </div>
+        </article>
+      `;
+    });
+  }
+
+  html += `</div></div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.deleteDraft = function(index) {
+  let drafts = getStoredDrafts();
+  drafts.splice(index, 1);
+  setStoredDrafts(drafts);
+  document.getElementById('draftsModal').remove();
+  openDrafts();
+};
+
+window.loadDraft = async function(index) {
+  const drafts = getStoredDrafts();
+  const draft = drafts[index];
+  if (!draft) return;
+  document.getElementById('draftsModal').remove();
+  state.editingApplicationId = null;
+  await populateApplicationForm(draft, "草稿加载成功，请重新生成PDF后提交");
+};
+
+async function fetchApplications() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/applications`, { headers: apiHeaders() });
+    if (res.ok) {
+      state.applications = await res.json();
+    }
+  } catch (e) {}
 }
 
 function render() {
@@ -791,66 +1249,19 @@ function renderNotices() {
 }
 
 function renderApplications() {
+  if (state.studentAppView === 'new') {
+    return renderNewApplication();
+  }
+  if (state.studentAppView === 'profile') {
+    return renderStudentProfile();
+  }
+
+  // List view
   return `
-    ${pageHead("申请与证明", "在线提交申请、查看审批结果，并在通过后预览或下载电子证明。", [
+    ${pageHead("申请与证明", "管理您的证明申请记录和个人信息。", [
+      ["student-edit-profile", "个人信息维护", "users", "ghost-button"],
       ["student-new-application", "新建申请", "plus", "primary-button"]
     ])}
-    <section class="grid two">
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">申请提交</p>
-            <h2>证明申请表</h2>
-          </div>
-        </div>
-        <form class="form-grid" data-form="application">
-          <label class="field">
-            <span>申请类型</span>
-            <select name="type" required>
-              <option>在读证明开具</option>
-              <option>党员材料补交</option>
-              <option>奖学金材料确认</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>用途</span>
-            <input type="text" name="purpose" placeholder="如实习、签证、奖学金" required />
-          </label>
-          <label class="field full">
-            <span>说明</span>
-            <textarea name="comment" placeholder="请补充使用场景、接收单位或特殊要求"></textarea>
-          </label>
-          <label class="field full">
-            <span>附件上传 (限PDF)</span>
-            <input type="file" name="file" accept=".pdf" />
-          </label>
-          <div class="toolbar field full">
-            <button type="submit" class="primary-button">${icon("upload")}提交申请</button>
-            <button type="button" class="ghost-button" data-action="save-draft">${icon("file")}保存草稿</button>
-            <button type="button" class="secondary-button" data-action="open-drafts">${icon("file")}草稿箱</button>
-          </div>
-        </form>
-      </div>
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">审批结果</p>
-            <h2>电子证明预览</h2>
-            <p>审核通过后自动生成文件编号，支持下载并保留操作日志。</p>
-          </div>
-        </div>
-        <div class="approval-preview">
-          <span class="badge success">已生成示例</span>
-          <strong>在读证明 / CERT-202605-009</strong>
-          <p>姓名：张同学 · 学号：2023120000 · 专业：计算机科学与技术</p>
-          <p>状态：等待管理员最终签发</p>
-          <div class="toolbar">
-            <button type="button" class="secondary-button" data-action="download-template">${icon("download")}下载 PDF</button>
-            <button type="button" class="ghost-button" data-action="copy-link">${icon("file")}复制编号</button>
-          </div>
-        </div>
-      </div>
-    </section>
     <section class="panel" style="margin-top:14px">
       <div class="panel-head">
         <div>
@@ -858,19 +1269,150 @@ function renderApplications() {
           <h2>近一年审批留痕</h2>
         </div>
       </div>
-      ${table(["申请单号", "类型", "状态", "提交时间", "操作"], applications.length > 0 ? applications.map(item => [
+      ${table(["申请单号", "类型", "状态", "提交时间", "操作"], state.applications && state.applications.length > 0 ? state.applications.map(item => [
         item.id,
         item.type,
         badge(item.status, item.status === "已通过" ? "success" : (item.status === "待补充" ? "danger" : "warning")),
         item.submit,
         actionButton(
-          item.status === "已通过" ? "下载" : (item.status === "待补充" ? "补交" : "查看"),
-          item.status === "待补充" ? "resubmit-application" : "table-action",
+          item.status === "待审核" ? "撤销" : "查看",
+          item.status === "待审核" ? "cancel-application" : "view-application",
           item.id
         )
       ]) : [
         ["-", "暂无记录", "-", "-", "-"]
       ])}
+    </section>
+  `;
+}
+
+function renderStudentProfile() {
+  const p = state.userProfile || {};
+  return `
+    <div class="panel-head" style="margin-bottom: 20px;">
+      <div>
+        <p class="eyebrow">学生端</p>
+        <h2>个人信息维护</h2>
+      </div>
+      <button class="ghost-button" data-action="student-app-back">${icon("arrow")} 返回列表</button>
+    </div>
+    <section class="panel">
+      <form class="form-grid" data-form="student-profile" onsubmit="handleUpdateProfile(event)">
+        <label class="field full">
+          <span>姓名</span>
+          <input type="text" name="name" value="${p.name || ''}" required />
+        </label>
+        <label class="field full">
+          <span>学号</span>
+          <input type="text" value="${p.student_no || ''}" disabled style="background: #f1f5f9; cursor: not-allowed;" />
+        </label>
+        <label class="field full">
+          <span>身份证号</span>
+          <input type="text" name="id_card" value="${p.id_card || ''}" />
+        </label>
+        <label class="field full">
+          <span>性别</span>
+          <select name="gender">
+            <option value="男" ${p.gender === '男' ? 'selected' : ''}>男</option>
+            <option value="女" ${p.gender === '女' ? 'selected' : ''}>女</option>
+          </select>
+        </label>
+        <label class="field full">
+          <span>电话号码</span>
+          <input type="tel" name="phone" value="${p.phone || ''}" />
+        </label>
+        <label class="field full">
+          <span>邮箱</span>
+          <input type="email" name="email" value="${p.email || ''}" />
+        </label>
+        <div class="toolbar field full">
+          <button type="submit" class="primary-button">${icon("check")}保存信息</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+window.handleUpdateProfile = async function(event) {
+  event.preventDefault();
+  const form = event.target;
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/profile`, {
+      method: 'PUT',
+      headers: apiHeaders(true),
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error(await res.text());
+    showToast("个人信息更新成功！");
+    await fetchProfile(); // refresh local state
+    state.studentAppView = 'list';
+    render();
+  } catch(e) {
+    showToast("更新失败: " + e.message);
+  }
+};
+
+function renderNewApplication() {
+  const tplOptions = state.templates.map(t => `<option value="${t.id}">${t.name}</option>`).join("");
+  return `
+    <div class="panel-head" style="margin-bottom: 20px;">
+      <div>
+        <p class="eyebrow">学生端</p>
+        <h2>新建申请</h2>
+      </div>
+      <button class="ghost-button" data-action="student-app-back">${icon("arrow")} 返回列表</button>
+    </div>
+    <section class="grid two">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">第一步</p>
+            <h2>填写与上传</h2>
+          </div>
+        </div>
+        <form class="form-grid" data-form="application-new" onsubmit="handleNewApplicationSubmit(event)">
+          <label class="field full">
+            <span>选择模板 (.docx)</span>
+            <select name="templateId" id="appTemplateSelect" required onchange="handleTemplateSelect()">
+              <option value="">请选择模板...</option>
+              ${tplOptions}
+            </select>
+          </label>
+          <label class="field full">
+            <span>用途</span>
+            <input type="text" name="purpose" placeholder="如实习、签证、奖学金" required />
+          </label>
+          <label class="field full">
+            <span>说明</span>
+            <textarea name="comment" placeholder="请详细说明修改或复核的理由"></textarea>
+          </label>
+          <div id="dynamic-fields-container" class="form-grid full" style="margin: 0;"></div>
+          <label class="field full">
+            <span>其他附件上传 (可选，支持图片/PDF等)</span>
+            <input type="file" name="attachment" id="appAttachment" />
+          </label>
+          <div class="toolbar field full">
+            <button type="button" class="secondary-button" onclick="previewFilledTemplate()">${icon("search")}预览生成的PDF</button>
+            <button type="button" class="ghost-button" onclick="saveDraft()">${icon("file")}保存草稿</button>
+            <button type="button" class="ghost-button" onclick="openDrafts()">${icon("file")}草稿箱</button>
+            <button type="submit" class="primary-button">${icon("upload")}提交申请</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">第二步</p>
+            <h2>模板预览区</h2>
+          </div>
+        </div>
+        <div id="pdf-preview-container" style="min-height: 400px; border: 1px solid #e2e8f0; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: #f8fafc; overflow: auto;">
+          <span style="color: #94a3b8;">请先选择模板并点击预览</span>
+        </div>
+      </div>
     </section>
   `;
 }
@@ -938,33 +1480,39 @@ function renderAnalysis() {
 }
 
 function renderTemplates() {
-  const templates = [
-    ["在读证明模板", "证明类", "v1.2", "启用"],
-    ["党员材料模板", "党团类", "v2.0", "启用"],
-    ["奖学金申请表", "奖助类", "v1.5", "启用"],
-    ["成绩单核对说明", "学业类", "v1.0", "草稿"]
-  ];
   return `
     ${pageHead("模板下载", "集中下载证明、党团、奖助与成绩分析相关模板。", [
-      ["quick-search", "检索模板", "search", "ghost-button"]
     ])}
     <section class="grid three">
-      ${templates.map(([name, type, version, status]) => `
+      ${state.templates && state.templates.length > 0 ? state.templates.map(t => `
         <article class="list-card">
           <header>
-            <h3>${name}</h3>
-            ${badge(status, status === "启用" ? "success" : "neutral")}
+            <h3>${t.name}</h3>
+            ${badge(t.type, "neutral")}
           </header>
-          <p>${type} · ${version} · 维护部门已审核</p>
+          <p>版本: ${t.version} · 维护部门已审核</p>
           <div class="toolbar">
-            <button type="button" class="secondary-button" data-action="download-template">${icon("download")}下载</button>
-            <button type="button" class="ghost-button" data-action="copy-link">${icon("file")}查看说明</button>
+            <button type="button" class="secondary-button" onclick="downloadTemplateDocx('${t.id}')">${icon("download")}下载纯模板</button>
           </div>
         </article>
-      `).join("")}
+      `).join("") : '<p style="padding: 20px;">暂无可下载的模板</p>'}
     </section>
   `;
 }
+
+window.downloadTemplateDocx = function(id) {
+  const template = (state.templates || []).find(t => String(t.id) === String(id));
+  if (template && template.file_data) {
+    const a = document.createElement("a");
+    a.href = template.file_data;
+    a.download = `${template.name}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    showToast("模板文件不存在");
+  }
+};
 
 function renderAdminView() {
   const views = {
@@ -982,12 +1530,13 @@ function renderAdminView() {
 }
 
 function renderAdminDashboard() {
+  const pendingApprovals = (state.applications || []).filter(app => app.status === "待审核");
   return `
     ${pageHead("后台首页", "面向老师与管理人员的维护、审核、配置和批量数据处理工作台。", [
       ["new-notice", "新建通知", "plus", "primary-button"]
     ])}
     <section class="grid four">
-      ${metric("待处理事项", "18", "较昨日 +3", "amber")}
+      ${metric("待处理事项", pendingApprovals.length.toString(), "需要您的审核", "amber")}
       ${metric("平均响应", "1.8s", "常规查询 < 2s", "green")}
       ${metric("知识库条目", "326", "本月新增 24", "brand")}
       ${metric("导入任务", "4", "2 个待校验", "teal")}
@@ -1001,7 +1550,15 @@ function renderAdminDashboard() {
           </div>
           <button class="ghost-button" type="button" data-nav="admin" data-view="approval">${icon("shield")}进入审批</button>
         </div>
-        ${approvalTable()}
+        ${table(["申请单号", "类型", "申请人", "提交时间", "操作"], pendingApprovals.length > 0 ? pendingApprovals.map(item => [
+          item.id,
+          item.type,
+          item.applicant,
+          item.submit,
+          `<button type="button" class="secondary-button" onclick="openApprovalDetail('${item.id}')">审核</button>`
+        ]) : [
+          ["-", "暂无待审批事项", "-", "-", "-"]
+        ])}
       </div>
       <div class="admin-main-list">
         <div class="panel">
@@ -1167,81 +1724,297 @@ function renderProcessConfig() {
 }
 
 function renderApprovalManage() {
-  const selected = applications.find((item) => item.id === state.selectedApproval) || applications[0];
+  if (state.adminApprovalView === 'detail') {
+    return renderApprovalDetail();
+  }
+  
+  // list view
   return `
     ${pageHead("审批管理", "集中处理申请单，支持通过、退回补充与操作日志审计。", [
-      ["export-approval", "批量导出", "download", "ghost-button"],
-      ["view-returned", "查看可撤回记录", "file", "ghost-button"]
     ])}
-    <section class="admin-layout">
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div><p class="eyebrow">申请列表</p><h2>待审核队列</h2></div>
+      </div>
+      <div class="notice-list">
+        ${state.applications && state.applications.length > 0 ? state.applications.map((item) => `
+          <article class="list-card">
+            <header>
+              <h3>${item.type}</h3>
+              ${badge(item.status, item.status === "待补充" ? "danger" : (item.status === "已通过" ? "success" : "warning"))}
+            </header>
+            <p>${item.applicant} · ${item.submit}</p>
+            <p>${item.purpose || '无用途说明'}</p>
+            <div class="toolbar">
+              <button type="button" class="secondary-button" onclick="openApprovalDetail('${item.id}')">${icon("file")}查看详情</button>
+            </div>
+          </article>
+        `).join("") : '<p style="color:#94a3b8; padding: 20px;">暂无申请记录</p>'}
+      </div>
+    </section>
+  `;
+}
+
+window.openApprovalDetail = function(id) {
+  state.selectedApproval = id;
+  state.adminView = 'approval';
+  state.adminApprovalView = 'detail';
+  render();
+  setTimeout(() => {
+    const selected = (state.applications || []).find((item) => String(item.id) === String(id));
+    if (selected && selected.fileData && selected.fileData.startsWith('data:application/pdf')) {
+      const container = document.getElementById(`pdf-viewer-${selected.id}`);
+      if (container) {
+        const blobUrl = dataURLtoBlobURL(selected.fileData);
+        if (window.EmbedPDF) {
+          container.innerHTML = '';
+          window.EmbedPDF.init({
+            type: 'container',
+            target: container,
+            src: blobUrl,
+            theme: { preference: 'system' }
+          });
+        } else {
+          container.innerHTML = `<iframe src="${blobUrl}" width="100%" height="500px"></iframe>`;
+        }
+      }
+    }
+  }, 100);
+};
+
+window.dataURLtoBlobURL = function(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while(n--){
+      u8arr[n] = bstr.charCodeAt(n);
+  }
+  const blob = new Blob([u8arr], {type: mime});
+  return URL.createObjectURL(blob);
+};
+
+window.closeApprovalDetail = function() {
+  state.adminApprovalView = 'list';
+  render();
+};
+
+function renderApprovalDetail() {
+  const selected = (state.applications || []).find((item) => item.id === state.selectedApproval);
+  if (!selected) {
+    return `<div class="panel"><p>记录不存在</p><button onclick="closeApprovalDetail()">返回</button></div>`;
+  }
+
+  const isPendingApproval = selected.status === "待审核";
+  const statusTone = selected.status === "已通过" ? "success" : (selected.status === "待补充" ? "danger" : "warning");
+  const reviewContent = isPendingApproval
+    ? `
+        <label class="field" style="margin-top:14px">
+          <span>审批意见</span>
+          <textarea id="approvalCommentInput" placeholder="请输入通过意见或退回原因"></textarea>
+        </label>
+        <div class="toolbar" style="margin-top:14px">
+          <button type="button" class="ghost-button" onclick="handleReview('${selected.id}', 'reject')">${icon("x")}退回补充</button>
+          <button type="button" class="primary-button" onclick="handleReview('${selected.id}', 'approve')">${icon("check")}通过</button>
+        </div>
+      `
+    : `
+        <div class="field" style="margin-top:14px">
+          <span>审批意见</span>
+          <div style="margin-top: 6px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; white-space: pre-wrap;">${escapeHtml(selected.admin_comment || '暂无审批意见')}</div>
+        </div>
+        <div class="toolbar" style="margin-top:14px">
+          ${badge(selected.status, statusTone)}
+        </div>
+      `;
+
+  return `
+    <div class="panel-head" style="margin-bottom: 20px;">
+      <div>
+        <p class="eyebrow">审批管理</p>
+        <h2>审批详情</h2>
+      </div>
+      <button class="ghost-button" type="button" onclick="closeApprovalDetail()">${icon("arrow")} 返回列表</button>
+    </div>
+    <section class="grid two">
       <div class="panel">
         <div class="panel-head">
-          <div><p class="eyebrow">申请列表</p><h2>待审核队列</h2></div>
-          <div class="chip-row">
-            <button class="chip is-active" type="button">待审核</button>
-            <button class="chip" type="button">筛选</button>
-          </div>
+          <div><p class="eyebrow">申请详情</p><h2>${selected.type}</h2></div>
         </div>
-        <div class="notice-list">
-          ${applications.map((item) => `
-            <article class="list-card ${state.selectedApproval === item.id ? "is-unread" : ""}">
-              <header>
-                <h3>${item.type}</h3>
-                ${badge(item.status, item.status === "待补充" ? "danger" : "warning")}
-              </header>
-              <p>${item.applicant} · ${item.submit}</p>
-              <p>${item.comment}</p>
-              <div class="toolbar">
-                <button type="button" class="secondary-button" data-select-approval="${item.id}">${icon("file")}查看详情</button>
-              </div>
-            </article>
-          `).join("")}
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">申请详情</p><h2>${selected.type}</h2></div></div>
         <div class="approval-preview">
           <strong>申请人：${selected.applicant}</strong>
           <p>申请单号：${selected.id}</p>
-          <p>附件：${selected.file}</p>
+          <p>当前状态：${selected.status}</p>
+          <p>用途：${selected.purpose || '无'}</p>
           <p>说明：${selected.comment}</p>
+          ${selected.attachmentData ? `<div style="margin-top: 10px;">
+            <strong>补充附件：</strong>
+            <button class="secondary-button" onclick="downloadAttachment('${selected.id}')">${icon("download")}下载附件</button>
+          </div>` : ''}
         </div>
-        <label class="field" style="margin-top:14px">
-          <span>审批意见</span>
-          <textarea placeholder="请输入通过意见或退回原因"></textarea>
-        </label>
-        <div class="toolbar" style="margin-top:14px">
-          <button type="button" class="ghost-button" data-action="approval-return">${icon("x")}退回补充</button>
-          <button type="button" class="primary-button" data-action="approval-pass">${icon("check")}通过</button>
+        ${reviewContent}
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">自动生成</p>
+            <h2>填写的模板PDF预览</h2>
+          </div>
+          ${selected.fileData && selected.fileData.startsWith('data:application/pdf') ? `
+            <button class="secondary-button" type="button" onclick="downloadBase64PDF('${selected.id}')">${icon("download")}下载PDF</button>
+          ` : ''}
+        </div>
+        <div id="pdf-viewer-${selected.id}" style="min-height: 500px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; display: flex; align-items: center; justify-content: center;">
+          ${selected.fileData && selected.fileData.startsWith('data:application/pdf') 
+            ? `<span style="color: #94a3b8;">正在加载PDF预览...</span>` 
+            : `<span style="color: #94a3b8;">该申请暂无PDF模板数据</span>`}
         </div>
       </div>
     </section>
   `;
 }
 
+window.downloadAttachment = function(id) {
+  const application = (state.applications || []).find(a => String(a.id) === String(id));
+  if (application && application.attachmentData) {
+    const a = document.createElement("a");
+    a.href = application.attachmentData;
+    a.download = `attachment-${id}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    showToast("附件不存在");
+  }
+};
+
+window.downloadBase64PDF = function(id) {
+  const application = (state.applications || []).find(a => String(a.id) === String(id));
+  if (application && application.fileData) {
+    const a = document.createElement("a");
+    a.href = application.fileData;
+    a.download = `template-${id}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    showToast("PDF不存在");
+  }
+};
+
+window.handleReview = async function(id, result) {
+  const comment = document.getElementById("approvalCommentInput").value;
+  try {
+    const res = await fetch(`${API_BASE_URL}/applications/review`, {
+      method: 'POST',
+      headers: apiHeaders(true),
+      body: JSON.stringify({ applicationId: id, result, comment })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showToast("审核操作成功");
+    await fetchApplications();
+    state.adminApprovalView = 'list';
+    render();
+  } catch(e) {
+    showToast("审核失败: " + e.message);
+  }
+};
+
 function renderTemplateManage() {
-  return adminPageWithTable(
-    "模板管理",
-    "维护证明模板、变量字段、版本和发布状态。",
-    ["模板预览", "新增模板"],
-    ["模板名称", "类型", "版本", "状态", "操作"],
-    [
-      ["在读证明模板", "证明类", "v1.2", badge("启用", "success"), actionButton("编辑")],
-      ["党员材料模板", "党团类", "v2.0", badge("草稿", "neutral"), actionButton("发布")]
-    ],
-    `
+  return `
+    ${pageHead("模板管理", "维护证明模板、Word模板文件上传和版本状态。", [])}
+    <section class="grid two">
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">模板编辑区</p><h2>变量字段</h2></div></div>
-        <form class="form-grid" data-form="admin">
-          ${field("模板名称", "input", "在读证明模板")}
-          ${field("变量字段", "textarea", "姓名、学号、专业、年级、日期", true)}
-          ${field("模板说明", "textarea", "支持上传 Word/PDF 模板，并配置字段映射与导出格式。", true)}
-          <div class="toolbar field full"><button class="primary-button" type="submit">${icon("check")}保存模板</button></div>
+        <div class="panel-head"><div><p class="eyebrow">模板编辑区</p><h2>上传新模板</h2></div></div>
+        <form class="form-grid" data-form="admin-template" onsubmit="handleUploadTemplate(event)">
+          <label class="field full">
+            <span>模板名称</span>
+            <input type="text" name="name" required placeholder="例如：在读证明模板" />
+          </label>
+          <label class="field full">
+            <span>模板类型</span>
+            <select name="type">
+              <option>证明类</option>
+              <option>党团类</option>
+              <option>奖助类</option>
+              <option>学业类</option>
+            </select>
+          </label>
+          <label class="field full">
+            <span>Word模板文件 (.docx, 需带 {变量名} 标签)</span>
+            <input type="file" name="file" accept=".docx" required />
+          </label>
+          <div class="toolbar field full"><button class="primary-button" type="submit">${icon("upload")}上传模板</button></div>
         </form>
       </div>
-    `
-  );
+      <div class="panel">
+        <div class="panel-head"><div><p class="eyebrow">现有模板</p><h2>已上传列表</h2></div></div>
+        <div class="template-list">
+          ${state.templates.length === 0 ? '<p style="color:#94a3b8; padding: 20px;">暂无模板</p>' : state.templates.map(t => `
+            <article class="list-card">
+              <header>
+                <h3>${t.name}</h3>
+                ${badge(t.type, "neutral")}
+              </header>
+              <p>版本: ${t.version}</p>
+              <div class="toolbar">
+                <button type="button" class="secondary-button" onclick="deleteTemplate('${t.id}')">${icon("x")}删除</button>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+      </div>
+    </section>
+  `;
 }
+
+window.handleUploadTemplate = async function(event) {
+  event.preventDefault();
+  const form = event.target;
+  const name = form.name.value;
+  const type = form.type.value;
+  const fileInput = form.file;
+
+  if (fileInput.files.length === 0) return;
+  const file = fileInput.files[0];
+  
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const fileData = reader.result; // Base64 Data URL
+    try {
+      const res = await fetch(`${API_BASE_URL}/templates`, {
+        method: 'POST',
+        headers: apiHeaders(true),
+        body: JSON.stringify({ name, type, fileData })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      showToast("模板上传成功！");
+      form.reset();
+      await fetchTemplates();
+      render();
+    } catch(e) {
+      showToast("上传失败: " + e.message);
+    }
+  };
+  reader.readAsDataURL(file);
+};
+
+window.deleteTemplate = async function(id) {
+  if (!confirm("确定要删除此模板吗？")) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/templates/${id}`, {
+      method: 'DELETE',
+      headers: apiHeaders()
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showToast("删除成功");
+    await fetchTemplates();
+    render();
+  } catch(e) {
+    showToast("删除失败: " + e.message);
+  }
+};
 
 function renderTrainingManage() {
   return adminPageWithTable(
@@ -1469,8 +2242,9 @@ function badge(text, type) {
   return `<span class="badge ${type || ""}">${text}</span>`;
 }
 
-function actionButton(text) {
-  return `<button type="button" class="ghost-button" data-action="table-action">${text}</button>`;
+function actionButton(text, action = "table-action", dataId = "") {
+  const idAttr = dataId ? ` data-id="${escapeHtml(dataId)}"` : "";
+  return `<button type="button" class="ghost-button" data-action="${escapeHtml(action)}"${idAttr}>${text}</button>`;
 }
 
 function field(label, type, value, full = false) {
@@ -1566,11 +2340,21 @@ document.addEventListener("click", async (event) => {
     if (navButton.dataset.nav === "student") {
       state.studentView = navButton.dataset.view;
       state.role = "student";
+      if (state.studentView === "applications") {
+        state.studentAppView = "list";
+        await fetchApplications();
+      } else if (state.studentView === "templates") {
+        await fetchTemplates();
+      }
     } else {
       state.adminView = navButton.dataset.view;
       state.role = "admin";
       if (state.adminView === "knowledge") {
         await fetchPolicies({ silent: true, keyword: "", category: "全部" });
+      } else if (state.adminView === "approval") {
+        await fetchApplications();
+      } else if (state.adminView === "templateManage") {
+        await fetchTemplates();
       }
     }
     state.mobileMenuOpen = false;
@@ -1669,11 +2453,98 @@ document.addEventListener("click", async (event) => {
     showToast("已安全退出");
     return;
   }
+  if (action === "cancel-application") {
+    const id = event.target.closest("[data-action]").dataset.id;
+    if (confirm("确定要撤销该申请吗？")) {
+      try {
+        const application = state.applications.find(a => String(a.id) === String(id));
+        const res = await fetch(`${API_BASE_URL}/applications/${id}`, {
+          method: 'DELETE',
+          headers: apiHeaders()
+        });
+        if (!res.ok) throw new Error(await res.text());
+        if (application) {
+          saveDraftRecord(buildDraftFromApplication(application));
+        }
+        showToast("申请已撤销，内容已自动保存到草稿箱");
+        await fetchApplications();
+        render();
+      } catch (e) {
+        showToast("撤销失败: " + e.message);
+      }
+    }
+    return;
+  }
+  if (action === "table-action") {
+    const id = event.target.closest("[data-action]").dataset.id;
+    // ... logic if needed for generic table actions ...
+  }
+  if (action === "view-application") {
+    const id = event.target.closest("[data-action]").dataset.id;
+    const app = state.applications.find(a => String(a.id) === String(id));
+    if (app) {
+      const adminComment = app.admin_comment || "暂无批语";
+      let html = `
+        <div class="modal" id="appDetailModal" style="display: flex;">
+          <div class="modal-panel" style="width: 500px;">
+            <div class="modal-head">
+              <div><p class="eyebrow">申请详情</p><h2>审核结果</h2></div>
+              <button type="button" class="icon-button" onclick="document.getElementById('appDetailModal').remove()">${icon("x")}</button>
+            </div>
+            <div style="padding-top: 10px;">
+              <p><strong>状态：</strong> ${app.status}</p>
+              <p><strong>用途：</strong> ${escapeHtml(app.purpose || '无')}</p>
+              <p><strong>说明：</strong> ${escapeHtml(app.comment || '无')}</p>
+              <p><strong>管理员批语：</strong></p>
+              <div style="background: #f1f5f9; padding: 10px; border-radius: 6px; margin-top: 5px;">
+                ${escapeHtml(adminComment)}
+              </div>
+              ${app.attachmentData ? `
+                <div style="margin-top: 12px;">
+                  <button class="secondary-button" onclick="downloadAttachment('${app.id}')">${icon("download")}下载补充附件</button>
+                </div>
+              ` : ''}
+            </div>
+            <div class="toolbar" style="margin-top: 20px;">
+              ${app.status === "已通过" ? `<button class="secondary-button" onclick="downloadBase64PDF('${app.id}')">${icon("download")}下载证明文件</button>` : ''}
+              ${app.status === "待补充" ? `<button class="secondary-button" data-action="resubmit-application" data-id="${app.id}">${icon("file")}修改</button>` : ''}
+              <button class="primary-button" onclick="document.getElementById('appDetailModal').remove()">${icon("check")}确定</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', html);
+    }
+    return;
+  }
+  if (action === "resubmit-application") {
+    document.getElementById('appDetailModal')?.remove();
+    const id = event.target.closest("[data-action]").dataset.id;
+    const app = state.applications.find(a => String(a.id) === String(id));
+    if (app) {
+      state.editingApplicationId = app.id;
+      await populateApplicationForm(app);
+    }
+    return;
+  }
   if (action === "student-new-application") {
     state.studentView = "applications";
-    state.role = "student";
+    state.studentAppView = "new";
+    state.editingApplicationId = null; // Clear any editing state for new application
+    await fetchTemplates();
     render();
-    showToast(messages[action]);
+    return;
+  }
+  if (action === "student-edit-profile") {
+    state.studentView = "applications";
+    state.studentAppView = "profile";
+    render();
+    return;
+  }
+  if (action === "student-app-back") {
+    state.studentAppView = "list";
+    state.editingApplicationId = null; // Clear editing state
+    render();
     return;
   }
   if (action === "new-notice") {
