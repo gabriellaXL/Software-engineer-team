@@ -1,145 +1,355 @@
 # 学院学生综合服务与党团管理平台 - 后端服务说明
 
-各位团队成员好，
+本文档面向项目交付、前后端联调和答辩准备。
 
-目前我们项目的**后端基础架构**已经搭建完成，并且成功接入了**人大金仓（Kingbase）数据库**。为了方便大家在各自的电脑上把项目跑起来并进行后续的开发与联调，请参考以下说明：
+当前后端已完成核心模块开发，重点工作已从“补功能”转为“稳定交付、可复现启动、便于演示与答辩”。
 
-## 1. 当前后端架构与技术栈
-* **运行环境**：Node.js
-* **Web 框架**：Express
-* **数据库**：人大金仓 KingbaseES（使用 `pg` 驱动进行连接）
-* **接口规范**：RESTful API
-* **认证方式**：JWT (JSON Web Token) 校验
-* **第三方依赖服务**：Gotenberg (用于将 DOCX 模板转换为 PDF)
+## 1. 技术栈与系统说明
 
-## 2. 本地运行步骤
+- 运行环境：Node.js
+- Web 框架：Express
+- 数据库：人大金仓 KingbaseES
+- 数据库驱动：`pg`
+- 接口规范：RESTful API
+- 认证方式：JWT
+- 文件上传：`multer`
+- 第三方依赖服务：Gotenberg，用于将 DOCX 模板转换为 PDF
 
-### 2.0 启动 Gotenberg 服务 (PDF转换依赖)
-本项目在处理“证明申请”模块时，需要将填好数据的 Word (.docx) 文件转换为 PDF 进行在线预览。我们使用了开源的 Gotenberg 服务来实现此功能。
-请在运行后端服务前，确保你的电脑已安装 Docker，并开启一个新的终端执行以下命令来启动 Gotenberg 容器：
+## 2. 项目当前状态
+
+目前后端已包含以下模块：
+
+- 认证模块
+- 政策知识库模块
+- 党团流程模块
+- 业务申请与审批模块
+- 电子证明模块
+- 学业分析模块
+- 通知、用户、培养方案等基础管理模块
+- 模板上传与管理模块
+
+说明：
+
+- README 中旧版本提到“任务块五可能尚未实现”的描述已不再适用。
+- 当前仓库中已经提供通知、用户、培养方案相关接口，可直接联调。
+- 建议当前阶段优先做文档收口、全链路回归和答辩材料准备。
+
+## 3. 本地启动前准备
+
+启动前请确认本机已经具备以下环境：
+
+- Node.js
+- npm
+- Docker
+- 人大金仓 KingbaseES 数据库
+
+建议使用以下交付流程启动项目：
+
+1. 启动 Gotenberg
+2. 创建本地数据库
+3. 配置环境变量
+4. 安装依赖
+5. 初始化数据库
+6. 启动后端服务
+
+## 4. 启动顺序
+
+### 4.1 启动 Gotenberg 服务
+
+电子证明相关流程依赖 Gotenberg 进行 DOCX 转 PDF。
+
+请先在新终端中执行：
+
 ```bash
 docker run --rm -p 3001:3000 gotenberg/gotenberg:8
 ```
-*(注：Gotenberg 容器启动后，会监听本地的 3001 端口，后端服务会自动将文件发送至此端口进行转换。)*
 
-### 2.1 安装依赖
-请确保你的电脑上已经安装了 Node.js。在终端中进入 `backend` 目录并安装所需依赖：
-```bash
-cd backend
-npm install
+说明：
+
+- 容器启动后会监听本地 `3001` 端口
+- 后端会将待转换的文件发送到该端口
+- 如果未启动该服务，电子证明或 PDF 转换相关功能会失败
+
+### 4.2 创建本地数据库
+
+请先在本地金仓数据库中创建一个空数据库，推荐名称：
+
+```text
+sds_db
 ```
 
-### 2.2 数据库初始化
-为了保证大家的表结构一致，避免手动执行 SQL 脚本带来的繁琐和错误，我们已经编写了一键初始化脚本。
+你也可以自定义数据库名，但必须与环境变量中的 `DB_NAME` 保持一致。
 
-1. **前提**：请在本地的人大金仓数据库管理工具中，新建一个空的数据库，命名为 `sds_db`（或者你自定义的名字）。
-2. **配置连接**：在运行脚本前，请先完成下一步 **2.3 配置环境变量**，确保 Node.js 能够连上你本地的金仓数据库。
-3. **一键初始化**：在 `backend` 目录下执行以下命令：
-   ```bash
-   node init_db.js
-   ```
-   **这个脚本会自动帮你完成以下事情**：
-   - 清理可能存在的旧表。
-   - 读取并执行 `schema.sql`，创建所有的业务表（注：已将设计文档中的 `sys_user` 表名修改为了 `tb_user`，以避开金仓数据库的系统内置关键字冲突）。
-   - 读取并执行 `mock_data.sql`，插入用于联调的测试账号和基础数据。
+### 4.3 配置环境变量
 
-**内置的测试账号如下**：
-- 学生端账号：`stu001`，密码：`123456`
-- 管理端账号：`admin001`，密码：`123456`
+请在 `backend` 目录下新建 `.env` 文件，推荐直接复制 `.env.example` 后修改。
 
-### 2.3 配置环境变量
-在 `backend` 目录下有一个 `.env` 文件，记录了数据库的连接信息。请大家**根据自己本地的数据库设置**修改该文件（特别是密码和用户名）：
+示例内容如下：
+
 ```env
 PORT=3000
 DB_HOST=localhost
 DB_PORT=54321
-DB_USER=system           # 替换为你的本地数据库用户名
-DB_PASSWORD=manager      # 替换为你的本地数据库密码
-DB_NAME=sds_db           # 替换为你创建的数据库名
+DB_USER=system
+DB_PASSWORD=manager
+DB_NAME=sds_db
 JWT_SECRET=sds_super_secret_key_2026
 ```
-*(注：`.env` 文件包含敏感密码信息，建议在配置 `.gitignore` 时将其忽略，避免提交到代码仓库。)*
 
-### 2.4 启动服务
-配置完成后，在 `backend` 目录下执行：
+说明：
+
+- `DB_USER`、`DB_PASSWORD`、`DB_NAME` 需要改成你本地数据库的真实配置
+- `.env` 属于敏感文件，不应提交到仓库
+
+### 4.4 安装依赖
+
+在 `backend` 目录下执行：
+
+```bash
+npm install
+```
+
+### 4.5 初始化数据库
+
+在 `backend` 目录下执行：
+
+```bash
+node init_db.js
+```
+
+初始化脚本会自动完成以下工作：
+
+- 清理旧表
+- 执行 `schema.sql`
+- 执行 `mock_data.sql`
+- 导入联调用基础数据与测试账号
+
+说明：
+
+- 数据表名称已统一使用 `tb_user`，避免与数据库系统关键字冲突
+
+### 4.6 启动后端服务
+
+在 `backend` 目录下执行：
+
 ```bash
 node server.js
 ```
-如果终端输出 `Connected to the Kingbase database`，则说明启动并连接数据库成功。
 
-## 3. 已实现的接口清单 (API)
-目前后端已经初步实现了设计文档中要求的核心接口，基础 URL 为 `http://localhost:3000`：
+若终端出现以下日志，说明服务已正常启动：
 
-* **认证模块** (`/api/auth`)
-  * `POST /login`：用户登录（返回 JWT Token）
-  * `GET /profile`：获取当前用户档案
-* **智能问答模块** (`/api/policies`)
-  * `GET /search`：查询政策知识库
-  * `POST /maintain`：管理员维护知识库
-* **党团流程模块** (`/api/process`)
-  * `GET /nodes`：获取流程节点定义
-  * `GET /progress`：获取学生当前进度
-  * `PUT /progress`：更新节点状态
-* **申请与审批模块** (`/api/applications`)
-  * `POST /`：学生提交申请
-  * `GET /`：查询申请列表
-  * `POST /review`：管理员审核申请
-* **电子证明模块** (`/api/certificates`)
-  * `POST /generate`：生成电子证明（需管理员权限）
-  * `GET /`：获取学生的证明文件列表
-* **学业分析模块** (`/api/analysis`)
-  * `POST /upload`：上传成绩单（目前包含模拟的异步解析逻辑）
-  * `GET /:transcriptId`：获取分析结果与建议
+- `Server is running on port 3000`
+- `Successfully connected to the Kingbase database`
 
-*(详细的请求参数与返回格式可以查看 `src/controllers/` 目录下的具体代码实现。)*
+## 5. 测试账号
 
-## 4. 前后端联调并行任务块划分
+执行 `node init_db.js` 后，系统会自动写入以下联调用账号：
 
-为了加快开发进度，建议将前端假数据替换为后端真数据的联调工作分为以下几个**互不干扰的任务块**，大家可以分工并行开发：
+| 角色 | 账号 | 密码 | 说明 |
+| --- | --- | --- | --- |
+| 学生 | `stu001` | `123456` | 学生端测试账号 |
+| 管理员 | `admin001` | `123456` | 管理端测试账号 |
 
-### 任务块一：知识库与政策查询模块 📚
-* **前端涉及常量**：`policies` (学生端搜索)、`knowledgeRows` (管理员端列表)
-* **后端对接接口**：
-  * `GET /api/policies/search` (供学生端查询)
-  * `POST /api/policies/maintain` (供管理员端维护)
-* **联调目标**：学生端输入关键词能查出数据库中的真实政策；管理员端能看到真实知识库列表。
+补充说明：
 
-### 任务块二：业务申请与审批流模块 📝
-* **前端涉及常量**：`applications`
-* **后端对接接口**：
-  * `POST /api/applications/` (学生提交)
-  * `GET /api/applications/` (查询列表)
-  * `POST /api/applications/review` (管理员审核)
-* **联调目标**：学生端提交表单后，数据库中产生记录，且管理员端能在“审批管理”中看到并操作“通过/驳回”。
+- 当前默认测试数据中主要提供学生和管理员两个账号
+- `teacher`、`leader`、`student_leader` 角色在代码中已支持权限控制，但默认测试数据中未内置
+- 如需测试更多角色，可以通过管理接口新增用户，或自行向数据库插入测试数据
 
-### 任务块三：党团流程可视化模块 🚩
-* **前端涉及常量**：`processNodes`
-* **后端对接接口**：
-  * `GET /api/process/nodes` (获取所有节点定义)
-  * `GET /api/process/progress` (获取当前学生进度)
-* **联调目标**：将写死的四个节点替换为后端真实数据，根据状态渲染为“已完成(done)”、“进行中(active)”、“未激活(next)”。
+## 6. 角色与权限说明
 
-### 任务块四：学业成绩分析模块 📊
-* **前端涉及常量**：`credits` (学分达成度)
-* **后端对接接口**：
-  * `POST /api/analysis/upload` (上传成绩单)
-  * `GET /api/analysis/:transcriptId` (获取解析结果)
-* **联调目标**：对接真实的文件上传功能，根据后端的解析结果动态渲染学生的学分图表和选课建议。
+当前后端主要涉及以下角色：
 
-### 任务块五：通知与后台基础管理模块 🔔
-* **前端涉及常量**：`notices`、`users`、`planRows`
-* **联调目标**：目前后端可能还未实现通知（Notice）和用户管理（User）的查询接口。此任务块需要后端同学先补充对应的 CRUD 接口，前端同学再接入。
+- `student`
+- `student_leader`
+- `admin`
+- `teacher`
+- `leader`
 
-### 任务块六：前端移动端适配模块 📱 (完全独立，可与其他任务并行)
-* **前端涉及文件**：主要修改 `styles.css`，少量修改 `index.html` 和 `app.js`（控制菜单的折叠/展开）。
-* **开发目标**：利用 CSS 媒体查询 (`@media`) 将当前的 PC 端宽屏布局适配为移动端页面。
-  * 将左右并排布局改为上下堆叠布局。
-  * 将左侧固定的导航栏改造为移动端常见的折叠式“汉堡菜单”。
-  * 调整字体大小、间距和按钮区域，使其更适合手指触屏点击。
-* **说明**：该任务属于纯前端 UI 修改，与接口数据获取（`fetch`）互不干扰，建议安排专人负责以提升整体开发效率。
+常用权限矩阵如下：
 
-## 5. 下一步工作建议
-* **前端同学**：按上述任务块认领工作，逐步删除 `app.js` 中的常量数组，改用 `fetch` 获取。注意所有请求必须在 Header 中携带 `Authorization: Bearer <token>`。
-* **后端同学**：配合前端同学的联调，查看控制台报错，修复可能存在的数据结构不匹配问题；着手开发**任务块五**中缺失的接口。
+| 模块 | 接口示例 | 可访问角色 |
+| --- | --- | --- |
+| 认证 | `/api/auth/login` | 全部 |
+| 当前用户档案 | `/api/auth/profile` | 已登录用户 |
+| 政策查询 | `/api/policies/search` | 已登录用户 |
+| 知识库维护 | `/api/policies/maintain` | `admin`、`teacher` |
+| 流程节点查看 | `/api/process/nodes` | 已登录用户 |
+| 流程进度查看 | `/api/process/progress` | 已登录用户 |
+| 流程进度更新 | `/api/process/progress` | `admin`、`teacher`、`student_leader` |
+| 申请提交/修改/删除 | `/api/applications` | `student`、`student_leader` |
+| 申请查询 | `/api/applications` | 已登录用户 |
+| 申请审核 | `/api/applications/review` | `admin`、`teacher` |
+| PDF 转换 | `/api/applications/convert-pdf` | 已登录用户 |
+| 电子证明生成 | `/api/certificates/generate` | `admin`、`teacher` |
+| 电子证明列表 | `/api/certificates` | `student`、`student_leader` |
+| 成绩单上传/分析结果查询 | `/api/analysis` | 已登录用户 |
+| 通知查看 | `/api/basic/notices` | 已登录用户 |
+| 通知管理 | `/api/basic/notices` | `admin`、`teacher`、`leader` |
+| 用户管理 | `/api/basic/users` | `admin`、`teacher`、`leader` |
+| 培养方案查看 | `/api/basic/plans` | 已登录用户 |
+| 培养方案管理 | `/api/basic/plans` | `admin`、`teacher`、`leader` |
+| 模板管理 | `/api/templates` | 查询为已登录用户；新增/删除为 `admin`、`teacher` |
 
-如果有任何环境配置或接口调用的问题，请随时在群里沟通！
+前端联调时，请在请求头中携带：
+
+```http
+Authorization: Bearer <token>
+```
+
+## 7. 已实现接口概览
+
+基础 URL：
+
+```text
+http://localhost:3000
+```
+
+### 7.1 认证模块
+
+- `POST /api/auth/login`：登录
+- `POST /api/auth/register`：注册
+- `GET /api/auth/profile`：获取当前用户档案
+- `PUT /api/auth/profile`：更新当前学生档案
+
+### 7.2 政策知识库模块
+
+- `GET /api/policies/search`：政策查询
+- `POST /api/policies/maintain`：知识库维护
+
+### 7.3 党团流程模块
+
+- `GET /api/process/nodes`：获取节点定义
+- `GET /api/process/progress`：获取学生进度
+- `PUT /api/process/progress`：更新节点状态
+
+### 7.4 申请与审批模块
+
+- `POST /api/applications`：提交申请
+- `GET /api/applications`：查询申请列表
+- `PUT /api/applications/:id`：修改申请
+- `DELETE /api/applications/:id`：删除申请
+- `POST /api/applications/review`：审核申请
+- `POST /api/applications/convert-pdf`：DOCX 转 PDF
+
+### 7.5 电子证明模块
+
+- `POST /api/certificates/generate`：生成电子证明
+- `GET /api/certificates`：获取学生证明列表
+
+### 7.6 学业分析模块
+
+- `POST /api/analysis/upload`：上传成绩单
+- `GET /api/analysis/:transcriptId`：获取分析结果
+
+### 7.7 基础管理模块
+
+- `GET /api/basic/notices`：通知列表
+- `POST /api/basic/notices`：新增通知
+- `PUT /api/basic/notices/:noticeId`：更新通知
+- `DELETE /api/basic/notices/:noticeId`：删除通知
+- `GET /api/basic/users`：用户列表
+- `POST /api/basic/users`：新增用户
+- `PUT /api/basic/users/:userId`：更新用户
+- `DELETE /api/basic/users/:userId`：删除用户
+- `GET /api/basic/plans`：培养方案列表
+- `POST /api/basic/plans`：新增培养方案
+- `PUT /api/basic/plans/:planId`：更新培养方案
+- `DELETE /api/basic/plans/:planId`：删除培养方案
+
+### 7.8 模板管理模块
+
+- `POST /api/templates`：上传模板
+- `GET /api/templates`：获取模板列表
+- `DELETE /api/templates/:id`：删除模板
+
+详细请求参数与返回格式可继续查看 `src/controllers/` 与 `src/routes/` 下的实现。
+
+## 8. 建议的联调验收链路
+
+为了确保项目达到“稳定交付”标准，建议至少走通以下链路：
+
+### 链路一：登录与身份识别
+
+- 使用 `stu001` 登录
+- 获取 JWT
+- 调用 `/api/auth/profile`
+
+### 链路二：学生申请与管理员审批
+
+- 学生提交申请
+- 管理员查看申请列表
+- 管理员执行通过或驳回
+
+### 链路三：政策查询
+
+- 学生查询政策
+- 管理员维护知识库后重新验证查询结果
+
+### 链路四：成绩分析或电子证明
+
+- 上传成绩单并获取分析结果
+- 或生成电子证明并验证 PDF 转换流程
+
+## 9. 常见问题排查
+
+### 9.1 数据库连接失败
+
+现象：
+
+- 启动时报错数据库无法连接
+
+优先检查：
+
+- `.env` 中数据库主机、端口、用户名、密码、库名是否正确
+- 金仓数据库服务是否已经启动
+- 数据库是否已经创建
+
+### 9.2 JWT 无效或提示未登录
+
+现象：
+
+- 返回 `Authentication required`
+- 返回 `Invalid token`
+
+优先检查：
+
+- 是否在请求头中携带 `Authorization: Bearer <token>`
+- 是否登录后使用了最新 token
+- `JWT_SECRET` 是否与签发 token 时保持一致
+
+### 9.3 Gotenberg 未启动
+
+现象：
+
+- 电子证明生成失败
+- DOCX 转 PDF 失败
+
+优先检查：
+
+- Docker 是否正常运行
+- Gotenberg 容器是否已经启动
+- 本地 `3001` 端口是否可用
+
+### 9.4 端口占用
+
+现象：
+
+- 服务启动失败
+
+优先检查：
+
+- `3000` 端口是否已被其他进程占用
+- 如有需要，可修改 `.env` 中的 `PORT`
+
+## 10. 当前阶段建议
+
+如果任务块一到任务块六都已完成，当前不建议继续盲目增加新功能，建议按以下顺序收尾：
+
+1. 完成 README 和环境模板整理
+2. 做一轮全链路回归
+3. 整理接口验收清单
+4. 补安全和参数校验
+5. 准备答辩图和演示脚本
+
+交付清单可参考项目根目录下的 `DELIVERY_CHECKLIST.md`。
