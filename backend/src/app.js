@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const authRoutes = require('./routes/authRoutes');
 const policyRoutes = require('./routes/policyRoutes');
@@ -8,12 +9,14 @@ const applicationRoutes = require('./routes/applicationRoutes');
 const certificateRoutes = require('./routes/certificateRoutes');
 const analysisRoutes = require('./routes/analysisRoutes');
 const templateRoutes = require('./routes/templateRoutes');
+const basicRoutes = require('./routes/basicRoutes');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -23,6 +26,7 @@ app.use('/api/applications', applicationRoutes);
 app.use('/api/certificates', certificateRoutes);
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/templates', templateRoutes);
+app.use('/api/basic', basicRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
