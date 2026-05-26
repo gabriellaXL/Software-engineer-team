@@ -4,12 +4,12 @@ INSERT INTO tb_user (user_id, role, account_id, password, status) VALUES
 ('U002', 'admin', 'admin001', '123456', 'active');
 
 -- 插入学生档案
-INSERT INTO student_profile (student_id, user_id, student_no, name, major, grade, phone) VALUES 
-('S001', 'U001', '20260001', '张三', '计算机科学与技术', '2026级', '13800000000');
+INSERT INTO student_profile (student_id, user_id, student_no, name, major, grade, class_name, phone, email) VALUES 
+('S001', 'U001', '20260001', '张三', '计算机科学与技术', '2026级', '计科 1 班', '13800000000', 'stu001@example.com');
 
 -- 插入管理员档案
-INSERT INTO admin_profile (admin_id, user_id, name, department, role) VALUES 
-('A001', 'U002', '李老师', '信息学院学生工作办公室', '辅导员');
+INSERT INTO admin_profile (admin_id, user_id, name, department, role, phone, email) VALUES 
+('A001', 'U002', '李老师', '信息学院学生工作办公室', '辅导员', '13900000000', 'admin001@example.com');
 
 -- 插入一条政策测试数据
 INSERT INTO policy_item (policy_id, title, category, keywords, content, status) VALUES 

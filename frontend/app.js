@@ -1229,6 +1229,7 @@ function renderSidebar(kind) {
         <strong>${profile[0]}</strong>
         <span>${profile[1]}</span>
         <span>${profile[2]}</span>
+        <button class="secondary-button" style="margin-top: 12px; width: 100%; padding: 6px;" data-action="edit-profile">修改个人信息</button>
         <button class="ghost-button" style="margin-top: 12px; width: 100%; padding: 6px;" data-action="logout">退出登录</button>
       </div>
     </aside>
@@ -1264,8 +1265,9 @@ function renderStudentView() {
 
 function renderStudentHome() {
   const noticeRows = state.notices.length ? state.notices : notices;
+  const userName = getCurrentUserName();
   return `
-    ${pageHead("上午好，张同学", "待办 2 项 · 未读通知 2 条 · 当前党团阶段：入党积极分子培养", [
+    ${pageHead(`上午好，${escapeHtml(userName)}`, "待办 2 项 · 未读通知 2 条 · 当前党团阶段：入党积极分子培养", [
       ["quick-search", "检索政策", "search", "ghost-button"],
       ["student-new-application", "提交申请", "plus", "primary-button"]
     ])}
@@ -1541,18 +1543,51 @@ function renderStudentProfile() {
         </label>
         <label class="field full">
           <span>学号</span>
-          <input type="text" value="${p.student_no || ''}" disabled style="background: #f1f5f9; cursor: not-allowed;" />
+          <input type="text" name="student_no" value="${p.student_no || p.account_id || ''}" required />
         </label>
         <label class="field full">
-          <span>身份证号</span>
-          <input type="text" name="id_card" value="${p.id_card || ''}" />
+          <span>班级</span>
+          <input type="text" name="class_name" value="${p.class_name || ''}" placeholder="例如：计科 1 班" />
         </label>
         <label class="field full">
-          <span>性别</span>
-          <select name="gender">
-            <option value="男" ${p.gender === '男' ? 'selected' : ''}>男</option>
-            <option value="女" ${p.gender === '女' ? 'selected' : ''}>女</option>
-          </select>
+          <span>电话号码</span>
+          <input type="tel" name="phone" value="${p.phone || ''}" />
+        </label>
+        <label class="field full">
+          <span>邮箱</span>
+          <input type="email" name="email" value="${p.email || ''}" />
+        </label>
+        <label class="field full">
+          <span>账户绑定说明</span>
+          <input type="text" value="当前登录账号与学号绑定，修改学号后请使用新学号重新登录" disabled style="background: #f1f5f9; cursor: not-allowed;" />
+        </label>
+        <div class="toolbar field full">
+          <button type="submit" class="primary-button">${icon("check")}保存信息</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderAdminProfile() {
+  const p = state.userProfile || {};
+  return `
+    <div class="panel-head" style="margin-bottom: 20px;">
+      <div>
+        <p class="eyebrow">管理员端</p>
+        <h2>个人信息维护</h2>
+      </div>
+      <button class="ghost-button" data-action="admin-profile-back">${icon("arrow")} 返回首页</button>
+    </div>
+    <section class="panel">
+      <form class="form-grid" data-form="admin-profile" onsubmit="handleUpdateProfile(event)">
+        <label class="field full">
+          <span>姓名</span>
+          <input type="text" name="name" value="${p.name || ''}" required />
+        </label>
+        <label class="field full">
+          <span>账号</span>
+          <input type="text" value="${p.account_id || ''}" disabled style="background: #f1f5f9; cursor: not-allowed;" />
         </label>
         <label class="field full">
           <span>电话号码</span>
@@ -1582,10 +1617,15 @@ window.handleUpdateProfile = async function(event) {
       headers: apiHeaders(true),
       body: JSON.stringify(payload)
     });
-    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(data.error || "个人信息更新失败");
     showToast("个人信息更新成功！");
-    await fetchProfile(); // refresh local state
-    state.studentAppView = 'list';
+    await fetchProfile();
+    if (state.role === "student" || state.role === "student_leader") {
+      state.studentAppView = 'list';
+    } else {
+      state.adminView = 'dashboard';
+    }
     render();
   } catch(e) {
     showToast("更新失败: " + e.message);
@@ -1730,7 +1770,7 @@ function renderTemplates() {
           </header>
           <p>版本: ${t.version} · 维护部门已审核</p>
           <div class="toolbar">
-            <button type="button" class="secondary-button" onclick="downloadTemplateDocx('${t.id}')">${icon("download")}下载纯模板</button>
+            <button type="button" class="secondary-button" onclick="downloadTemplateDocx('${t.id}')">${icon("download")}下载 DOCX 模板</button>
           </div>
         </article>
       `).join("") : '<p style="padding: 20px;">暂无可下载的模板</p>'}
@@ -1738,39 +1778,31 @@ function renderTemplates() {
   `;
 }
 
-window.downloadTemplateDocx = function(id) {
+window.downloadTemplateDocx = async function(id) {
   const template = (state.templates || []).find(t => String(t.id) === String(id));
   if (!template) return showToast("模板不存在");
 
-  if (template.file_url) {
-    const a = document.createElement("a");
-    a.href = `${API_BASE_URL}/templates/${encodeURIComponent(template.id)}/download`;
-    const ext = String(template.file_url).toLowerCase().endsWith('.pdf') ? '.pdf' : '.docx';
-    a.download = `${template.name}${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return;
+  try {
+    const response = await fetch(`${API_BASE_URL}/templates/${encodeURIComponent(template.id)}/download`, {
+      headers: apiHeaders()
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || "模板下载失败");
+    }
+    const blob = await response.blob();
+    const fileName = parseDownloadFileName(response.headers.get("content-disposition")) || `${template.name}.docx`;
+    triggerBlobDownload(blob, fileName);
+    showToast("模板下载成功");
+  } catch (error) {
+    showToast("模板下载失败: " + error.message);
   }
-
-  if (template.file_data) {
-    const isPdf = String(template.file_data).startsWith('data:application/pdf');
-    const ext = isPdf ? '.pdf' : '.docx';
-    const a = document.createElement("a");
-    a.href = template.file_data;
-    a.download = `${template.name}${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return;
-  }
-
-  showToast("模板文件不存在");
 };
 
 function renderAdminView() {
   const views = {
     dashboard: renderAdminDashboard,
+    profile: renderAdminProfile,
     users: renderUserManage,
     knowledge: renderKnowledgeManage,
     noticeManage: renderNoticeManage,
@@ -2179,7 +2211,7 @@ window.handleReview = async function(id, result) {
 
 function renderTemplateManage() {
   return `
-    ${pageHead("模板管理", "维护证明模板、Word模板文件上传和版本状态。", [])}
+    ${pageHead("模板管理", "请上传可回填的 DOCX 模板，系统会读取其中的 {} 标签生成填写项。", [])}
     <section class="grid two">
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">模板编辑区</p><h2>上传新模板</h2></div></div>
@@ -2198,9 +2230,14 @@ function renderTemplateManage() {
             </select>
           </label>
           <label class="field full">
-            <span>模板文件（.docx 支持回填标签；.pdf 仅支持下载）</span>
-            <input type="file" name="file" accept=".docx,.pdf" required />
+            <span>模板文件（仅支持 .docx）</span>
+            <input type="file" name="file" accept=".docx" required />
           </label>
+          <div class="list-card" style="padding: 14px;">
+            <strong>上传说明</strong>
+            <p style="margin-top: 8px;">请上传 .docx 文件，并在需要学生填写的位置使用 {姓名}、{学号}、{用途} 这样的花括号占位。</p>
+            <p style="margin-top: 8px;">花括号中间必须写明要填写的内容，否则系统无法识别并自动生成证明。</p>
+          </div>
           <div class="toolbar field full"><button class="primary-button" type="submit">${icon("upload")}上传模板</button></div>
         </form>
       </div>
@@ -2234,6 +2271,10 @@ window.handleUploadTemplate = async function(event) {
 
   if (fileInput.files.length === 0) return;
   const file = fileInput.files[0];
+  if (!String(file.name).toLowerCase().endsWith('.docx')) {
+    showToast("请上传 .docx 模板文件");
+    return;
+  }
   
   const reader = new FileReader();
   reader.onload = async () => {
@@ -2657,6 +2698,35 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function getCurrentUserName() {
+  return state.userProfile?.name || "同学";
+}
+
+function parseDownloadFileName(disposition) {
+  const value = String(disposition || "");
+  const utf8Match = value.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch (error) {
+      return utf8Match[1];
+    }
+  }
+  const plainMatch = value.match(/filename\s*=\s*"([^"]+)"/i) || value.match(/filename\s*=\s*([^;]+)/i);
+  return plainMatch ? plainMatch[1].trim() : "";
+}
+
+function triggerBlobDownload(blob, fileName) {
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
 function showToast(message) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -2928,9 +2998,24 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  if (action === "edit-profile") {
+    if (state.role === "student" || state.role === "student_leader") {
+      state.studentView = "applications";
+      state.studentAppView = "profile";
+    } else {
+      state.adminView = "profile";
+    }
+    render();
+    return;
+  }
   if (action === "student-edit-profile") {
     state.studentView = "applications";
     state.studentAppView = "profile";
+    render();
+    return;
+  }
+  if (action === "admin-profile-back") {
+    state.adminView = "dashboard";
     render();
     return;
   }

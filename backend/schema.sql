@@ -14,7 +14,12 @@ CREATE TABLE student_profile (
     name VARCHAR(50),
     major VARCHAR(100),
     grade VARCHAR(20),
-    phone VARCHAR(20)
+    class_name VARCHAR(100),
+    phone VARCHAR(20),
+    email VARCHAR(100),
+    id_card VARCHAR(50),
+    gender VARCHAR(20),
+    join_party_date DATE
 );
 
 CREATE TABLE admin_profile (
@@ -22,7 +27,9 @@ CREATE TABLE admin_profile (
     user_id VARCHAR(50) REFERENCES tb_user(user_id), -- 这里同步修改
     name VARCHAR(50),
     department VARCHAR(100),
-    role VARCHAR(50)
+    role VARCHAR(50),
+    phone VARCHAR(20),
+    email VARCHAR(100)
 );
 
 CREATE TABLE policy_item (

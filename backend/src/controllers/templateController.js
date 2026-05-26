@@ -21,7 +21,6 @@ function decodeDataUrl(dataUrl) {
 
 function resolveExtension(mimeType) {
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return '.docx';
-  if (mimeType === 'application/pdf') return '.pdf';
   return '';
 }
 
@@ -32,7 +31,7 @@ exports.uploadTemplate = async (req, res) => {
     const { buffer, mimeType } = decodeDataUrl(fileData);
     const extension = resolveExtension(mimeType);
     if (!extension) {
-      return res.status(400).json({ error: 'Only .docx and .pdf files are supported' });
+      return res.status(400).json({ error: '仅支持上传 .docx 模板文件' });
     }
     const templatesDir = ensureTemplatesDir();
     const fileName = `${templateId}${extension}`;

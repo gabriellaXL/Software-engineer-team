@@ -1,6 +1,49 @@
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 
+let profileSchemaReady = false;
+
+async function ensureProfileSchema() {
+  if (profileSchemaReady) return;
+  await db.query(`
+    ALTER TABLE student_profile
+      ADD COLUMN IF NOT EXISTS class_name VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS email VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS id_card VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS gender VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS join_party_date DATE;
+
+    ALTER TABLE admin_profile
+      ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS email VARCHAR(100);
+  `);
+  profileSchemaReady = true;
+}
+
+function normalizeValue(value) {
+  if (value === undefined || value === null) return null;
+  return String(value).trim();
+}
+
+async function getJoinedProfile(userId, role) {
+  const isStudent = role === 'student' || role === 'student_leader';
+  const query = isStudent
+    ? `
+        SELECT sp.*, u.account_id
+        FROM student_profile sp
+        JOIN tb_user u ON u.user_id = sp.user_id
+        WHERE sp.user_id = $1
+      `
+    : `
+        SELECT ap.*, u.account_id
+        FROM admin_profile ap
+        JOIN tb_user u ON u.user_id = ap.user_id
+        WHERE ap.user_id = $1
+      `;
+  const { rows } = await db.query(query, [userId]);
+  return rows[0] || {};
+}
+
 exports.login = async (req, res) => {
   const { accountId, password, role } = req.body;
   try {
@@ -40,6 +83,7 @@ exports.register = async (req, res) => {
   }
 
   try {
+    await ensureProfileSchema();
     // 检查是否已存在
     const existing = await db.query('SELECT * FROM tb_user WHERE account_id = $1', [accountId]);
     if (existing.rows.length > 0) {
@@ -59,14 +103,14 @@ exports.register = async (req, res) => {
     if (userRole === 'student') {
       const studentId = `STU-${Date.now()}`;
       await db.query(
-        'INSERT INTO student_profile (student_id, user_id, student_no, name) VALUES ($1, $2, $3, $4)',
-        [studentId, userId, accountId, username]
+        'INSERT INTO student_profile (student_id, user_id, student_no, name, email) VALUES ($1, $2, $3, $4, $5)',
+        [studentId, userId, accountId, username, email || '']
       );
     } else {
       const adminId = `ADM-${Date.now()}`;
       await db.query(
-        'INSERT INTO admin_profile (admin_id, user_id, name, role) VALUES ($1, $2, $3, $4)',
-        [adminId, userId, username, '管理老师']
+        'INSERT INTO admin_profile (admin_id, user_id, name, role, email) VALUES ($1, $2, $3, $4, $5)',
+        [adminId, userId, username, '管理老师', email || '']
       );
     }
 
@@ -79,16 +123,8 @@ exports.register = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     const { userId, role } = req.user;
-    let profileQuery = '';
-    
-    if (role === 'student' || role === 'student_leader') {
-      profileQuery = 'SELECT * FROM student_profile WHERE user_id = $1';
-    } else {
-      profileQuery = 'SELECT * FROM admin_profile WHERE user_id = $1';
-    }
-
-    const { rows } = await db.query(profileQuery, [userId]);
-    res.json(rows[0] || {});
+    await ensureProfileSchema();
+    res.json(await getJoinedProfile(userId, role));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -97,26 +133,78 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { userId, role } = req.user;
-    if (role !== 'student' && role !== 'student_leader') {
-      return res.status(403).json({ error: '仅学生可更新档案' });
+    await ensureProfileSchema();
+
+    const isStudent = role === 'student' || role === 'student_leader';
+    const name = normalizeValue(req.body.name);
+    const phone = normalizeValue(req.body.phone);
+    const email = normalizeValue(req.body.email);
+
+    if (isStudent) {
+      const studentNo = normalizeValue(req.body.student_no ?? req.body.accountId);
+      const className = normalizeValue(req.body.class_name ?? req.body.className);
+      const idCard = normalizeValue(req.body.id_card);
+      const gender = normalizeValue(req.body.gender);
+      const joinPartyDate = normalizeValue(req.body.join_party_date);
+
+      const currentProfile = await getJoinedProfile(userId, role);
+      if (!currentProfile.user_id) {
+        return res.status(404).json({ error: '未找到学生档案' });
+      }
+
+      if (!name) {
+        return res.status(400).json({ error: '姓名不能为空' });
+      }
+      if (!studentNo) {
+        return res.status(400).json({ error: '学号不能为空' });
+      }
+
+      const { rows: duplicateRows } = await db.query(
+        'SELECT user_id FROM tb_user WHERE account_id = $1 AND user_id <> $2',
+        [studentNo, userId]
+      );
+      if (duplicateRows.length > 0) {
+        return res.status(409).json({ error: '该学号已被其他账户使用' });
+      }
+
+      await db.query('BEGIN');
+      await db.query(
+        'UPDATE tb_user SET account_id = $1 WHERE user_id = $2',
+        [studentNo, userId]
+      );
+      await db.query(
+        `UPDATE student_profile
+         SET name = $1,
+             student_no = $2,
+             class_name = $3,
+             phone = $4,
+             email = $5,
+             id_card = $6,
+             gender = $7,
+             join_party_date = $8
+         WHERE user_id = $9`,
+        [name, studentNo, className || '', phone || '', email || '', idCard || '', gender || '', joinPartyDate || null, userId]
+      );
+      await db.query('COMMIT');
+      return res.json(await getJoinedProfile(userId, role));
     }
 
-    const { name, id_card, gender, phone, email, join_party_date } = req.body;
-    
-    const { rows } = await db.query(
-      `UPDATE student_profile 
+    await db.query(
+      `UPDATE admin_profile
        SET name = COALESCE($1, name),
-           id_card = COALESCE($2, id_card),
-           gender = COALESCE($3, gender),
-           phone = COALESCE($4, phone),
-           email = COALESCE($5, email),
-           join_party_date = COALESCE($6, join_party_date)
-       WHERE user_id = $7 RETURNING *`,
-      [name, id_card, gender, phone, email, join_party_date, userId]
+           phone = COALESCE($2, phone),
+           email = COALESCE($3, email)
+       WHERE user_id = $4`,
+      [name, phone, email, userId]
     );
 
-    res.json(rows[0]);
+    res.json(await getJoinedProfile(userId, role));
   } catch (err) {
+    try {
+      await db.query('ROLLBACK');
+    } catch (rollbackError) {
+      // Ignore rollback failure and surface the original error.
+    }
     res.status(500).json({ error: err.message });
   }
 };
