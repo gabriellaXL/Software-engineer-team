@@ -208,10 +208,31 @@ function apiHeaders(json = false) {
   return headers;
 }
 
+function getSessionItem(key) {
+  return window.sessionStorage.getItem(key);
+}
+
+function setSessionItem(key, value) {
+  window.sessionStorage.setItem(key, value);
+}
+
+function removeSessionItem(key) {
+  window.sessionStorage.removeItem(key);
+}
+
+function clearSessionState() {
+  removeSessionItem('sds_token');
+  removeSessionItem('sds_user');
+  removeSessionItem('sds_role');
+  removeSessionItem('sds_student_view');
+  removeSessionItem('sds_admin_view');
+  removeSessionItem('sds_last_transcript_id');
+}
+
 function saveCurrentView() {
-  localStorage.setItem('sds_role', state.role || '');
-  localStorage.setItem('sds_student_view', state.studentView || 'home');
-  localStorage.setItem('sds_admin_view', state.adminView || 'dashboard');
+  setSessionItem('sds_role', state.role || '');
+  setSessionItem('sds_student_view', state.studentView || 'home');
+  setSessionItem('sds_admin_view', state.adminView || 'dashboard');
 }
 
 function normalizePolicy(item = {}) {
@@ -398,7 +419,7 @@ async function uploadTranscriptFile(file) {
 
     state.transcriptTask = data;
     state.transcriptId = data.transcript_id;
-    localStorage.setItem('sds_last_transcript_id', data.transcript_id);
+    setSessionItem('sds_last_transcript_id', data.transcript_id);
     state.studentView = "analysis";
     saveCurrentView();
     await waitForAnalysisResult(data.transcript_id);
@@ -567,9 +588,9 @@ async function login(accountId, password, role) {
     state.role = data.user.role;
     state.user = data.user; // 保存真实用户信息
     
-    // You can optionally save to localStorage to persist login
-    localStorage.setItem('sds_token', data.token);
-    localStorage.setItem('sds_user', JSON.stringify(data.user));
+    // Keep auth state isolated per browser tab.
+    setSessionItem('sds_token', data.token);
+    setSessionItem('sds_user', JSON.stringify(data.user));
     
     // Fetch profile
     await fetchProfile();
@@ -2645,7 +2666,7 @@ function renderNoticeCard(item) {
 }
 
 async function bootstrapSession() {
-  const savedToken = localStorage.getItem('sds_token');
+  const savedToken = getSessionItem('sds_token');
   if (!savedToken) {
     render();
     return;
@@ -2655,14 +2676,14 @@ async function bootstrapSession() {
   state.isAuthenticated = true;
 
   try {
-    const savedUser = JSON.parse(localStorage.getItem('sds_user') || 'null');
+    const savedUser = JSON.parse(getSessionItem('sds_user') || 'null');
     if (savedUser) {
       state.user = savedUser;
       state.role = savedUser.role === 'student' ? 'student' : 'admin';
     }
-    const savedRole = localStorage.getItem('sds_role');
-    const savedStudentView = localStorage.getItem('sds_student_view');
-    const savedAdminView = localStorage.getItem('sds_admin_view');
+    const savedRole = getSessionItem('sds_role');
+    const savedStudentView = getSessionItem('sds_student_view');
+    const savedAdminView = getSessionItem('sds_admin_view');
 
     await fetchProfile();
     if (!state.role && state.userProfile?.role) {
@@ -2677,7 +2698,7 @@ async function bootstrapSession() {
       }
       if (state.studentView === "login" || state.studentView === "register") state.studentView = "home";
       await fetchProcessData({ silent: true });
-      const lastTranscriptId = localStorage.getItem('sds_last_transcript_id');
+      const lastTranscriptId = getSessionItem('sds_last_transcript_id');
       if (lastTranscriptId && state.studentView === "analysis") {
         state.transcriptTask = { transcript_id: lastTranscriptId, upload_time: "" };
         state.transcriptId = lastTranscriptId;
@@ -2694,12 +2715,7 @@ async function bootstrapSession() {
     state.isAuthenticated = false;
     state.user = null;
     state.userProfile = null;
-    localStorage.removeItem('sds_token');
-    localStorage.removeItem('sds_user');
-    localStorage.removeItem('sds_role');
-    localStorage.removeItem('sds_student_view');
-    localStorage.removeItem('sds_admin_view');
-    localStorage.removeItem('sds_last_transcript_id');
+    clearSessionState();
   }
 
   render();
@@ -3141,12 +3157,7 @@ document.addEventListener("click", async (event) => {
     state.editingPolicyId = null;
     state.editingUserId = null;
     state.editingPlanId = null;
-    localStorage.removeItem('sds_token');
-    localStorage.removeItem('sds_user');
-    localStorage.removeItem('sds_role');
-    localStorage.removeItem('sds_student_view');
-    localStorage.removeItem('sds_admin_view');
-    localStorage.removeItem('sds_last_transcript_id');
+    clearSessionState();
     render();
     showToast("已安全退出");
     return;
@@ -3461,8 +3472,8 @@ document.addEventListener("submit", async (event) => {
       saveCurrentView();
       
       // 存到浏览器的兜里，刷新页面也不会掉
-      localStorage.setItem('sds_token', data.token);
-      localStorage.setItem('sds_user', JSON.stringify(data.user));
+      setSessionItem('sds_token', data.token);
+      setSessionItem('sds_user', JSON.stringify(data.user));
       await fetchProfile();
       await fetchPolicies({ silent: true, keyword: "", category: "全部" });
       if (state.role === "student" || state.role === "student_leader") {
