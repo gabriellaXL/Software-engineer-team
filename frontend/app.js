@@ -185,7 +185,17 @@ function mountIcons(root = document) {
   });
 }
 
-const API_BASE_URL = 'http://localhost:3000/api';
+function resolveApiBaseUrl() {
+  const configuredBase = window.localStorage.getItem('sds_api_base_url');
+  if (configuredBase) {
+    return configuredBase.replace(/\/$/, '');
+  }
+
+  // Prefer same-origin deployment. This works when the backend also serves the frontend.
+  return '/api';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 function apiHeaders(json = false) {
   const headers = {};
