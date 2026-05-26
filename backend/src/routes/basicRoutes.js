@@ -13,6 +13,11 @@ const {
   updatePlan,
   deletePlan,
 } = require('../controllers/basicController');
+const {
+  downloadTemplate,
+  exportData,
+  importData,
+} = require('../controllers/importExportController');
 const { authenticate, authorize } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -29,5 +34,8 @@ router.get('/plans', authenticate, getPlans);
 router.post('/plans', authenticate, authorize(['admin', 'teacher', 'leader']), createPlan);
 router.put('/plans/:planId', authenticate, authorize(['admin', 'teacher', 'leader']), updatePlan);
 router.delete('/plans/:planId', authenticate, authorize(['admin', 'teacher', 'leader']), deletePlan);
+router.get('/import-export/templates/:type', authenticate, authorize(['admin', 'teacher', 'leader']), downloadTemplate);
+router.get('/import-export/data/:type', authenticate, authorize(['admin', 'teacher', 'leader']), exportData);
+router.post('/import-export/import/:type', authenticate, authorize(['admin', 'teacher', 'leader']), importData);
 
 module.exports = router;

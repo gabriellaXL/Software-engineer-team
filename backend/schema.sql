@@ -120,6 +120,11 @@ CREATE TABLE notice (
     title VARCHAR(200),
     target VARCHAR(100),
     content TEXT,
+    summary TEXT,
+    tags TEXT,
+    audience_grades TEXT,
+    attachment_name VARCHAR(255),
+    attachment_data TEXT,
     type VARCHAR(50),
     publish_time TIMESTAMP,
     status VARCHAR(20)

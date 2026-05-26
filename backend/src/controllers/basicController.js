@@ -1,4 +1,91 @@
 const db = require('../config/db');
+const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
+
+let noticeSchemaReady = false;
+
+async function ensureNoticeSchema() {
+  if (noticeSchemaReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS notice (
+      notice_id VARCHAR(50) PRIMARY KEY,
+      title VARCHAR(200),
+      target VARCHAR(100),
+      content TEXT,
+      summary TEXT,
+      tags TEXT,
+      audience_grades TEXT,
+      attachment_name VARCHAR(255),
+      attachment_data TEXT,
+      type VARCHAR(50),
+      publish_time TIMESTAMP,
+      status VARCHAR(20)
+    );
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS notice_delivery (
+      delivery_id VARCHAR(50) PRIMARY KEY,
+      notice_id VARCHAR(50) REFERENCES notice(notice_id),
+      student_id VARCHAR(50),
+      read_status VARCHAR(20),
+      read_time TIMESTAMP
+    );
+  `);
+  await db.query(`
+    ALTER TABLE notice
+      ADD COLUMN IF NOT EXISTS summary TEXT,
+      ADD COLUMN IF NOT EXISTS tags TEXT,
+      ADD COLUMN IF NOT EXISTS audience_grades TEXT,
+      ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS attachment_data TEXT;
+  `);
+  noticeSchemaReady = true;
+}
+
+function normalizeTagsInput(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item || '').trim()).filter(Boolean);
+      }
+    } catch (error) {
+      return value.split(/[，,]/).map((item) => item.trim()).filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
+function getNoticeSummary(row) {
+  const explicitSummary = String(row.summary || '').trim();
+  if (explicitSummary) return explicitSummary;
+  return String(row.content || '').trim().slice(0, 60);
+}
+
+function normalizeAudienceGradesInput(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item || '').trim()).filter(Boolean);
+      }
+    } catch (error) {
+      return value.split(/[，,]/).map((item) => item.trim()).filter(Boolean);
+    }
+  }
+
+  return [];
+}
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -17,6 +104,8 @@ function formatDate(value) {
 }
 
 function mapNotice(row) {
+  const tags = normalizeTagsInput(row.tags);
+  const audienceGrades = normalizeAudienceGradesInput(row.audience_grades);
   return {
     id: row.notice_id,
     title: row.title,
@@ -25,6 +114,11 @@ function mapNotice(row) {
     unread: row.read_status !== 'read',
     type: row.type,
     text: row.content,
+    summary: getNoticeSummary(row),
+    tags,
+    audienceGrades,
+    attachmentName: row.attachment_name || '',
+    attachmentData: row.attachment_data || '',
     status: row.status,
   };
 }
@@ -87,41 +181,67 @@ function mapPlan(row) {
 
 exports.getNotices = async (req, res) => {
   try {
+    await ensureNoticeSchema();
     let query = 'SELECT n.*, NULL AS read_status FROM notice n';
     const params = [];
 
     if (req.user.role === 'student' || req.user.role === 'student_leader') {
       query = `
-        SELECT n.*, d.read_status
+        SELECT n.*, d.read_status, sp.grade AS student_grade
         FROM notice n
-        LEFT JOIN notice_delivery d ON d.notice_id = n.notice_id
-        LEFT JOIN student_profile sp ON d.student_id = sp.student_id
-        WHERE sp.user_id = $1 OR d.delivery_id IS NULL
+        LEFT JOIN student_profile sp ON sp.user_id = $1
+        LEFT JOIN notice_delivery d
+          ON d.notice_id = n.notice_id
+         AND d.student_id = sp.student_id
       `;
       params.push(req.user.userId);
     }
 
-    query += ' ORDER BY n.publish_time DESC';
+    query += " WHERE COALESCE(n.status, 'published') <> 'draft' ORDER BY n.publish_time DESC";
     const { rows } = await db.query(query, params);
-    res.json(rows.map(mapNotice));
+    const notices = rows
+      .filter((row) => {
+        if (!(req.user.role === 'student' || req.user.role === 'student_leader')) return true;
+        const audienceGrades = normalizeAudienceGradesInput(row.audience_grades);
+        if (!audienceGrades.length) return true;
+        const studentGrade = String(row.student_grade || '').trim();
+        return studentGrade ? audienceGrades.includes(studentGrade) : false;
+      })
+      .map(mapNotice);
+    res.json(notices);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
 exports.createNotice = async (req, res) => {
-  const { title, content, target, type, status } = req.body;
+  const { title, content, target, type, status, summary, tags, audienceGrades, attachmentName, attachmentData } = req.body;
   if (!title || !content) {
     return res.status(400).json({ error: 'Title and content are required' });
   }
 
   try {
+    await ensureNoticeSchema();
     const noticeId = `N-${Date.now()}`;
+    const normalizedTags = normalizeTagsInput(tags);
+    const normalizedAudienceGrades = normalizeAudienceGradesInput(audienceGrades);
     const { rows } = await db.query(
-      `INSERT INTO notice (notice_id, title, target, content, type, publish_time, status)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6)
+      `INSERT INTO notice (notice_id, title, target, content, type, publish_time, status, summary, tags, audience_grades, attachment_name, attachment_data)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [noticeId, title, target || '全体学生', content, type || '综合', status || 'published']
+      [
+        noticeId,
+        title,
+        target || '全体学生',
+        content,
+        type || '综合',
+        status || 'published',
+        String(summary || '').trim() || String(content).slice(0, 60),
+        JSON.stringify(normalizedTags),
+        JSON.stringify(normalizedAudienceGrades),
+        attachmentName || '',
+        attachmentData || ''
+      ]
     );
     res.status(201).json(mapNotice(rows[0]));
   } catch (err) {
@@ -131,19 +251,27 @@ exports.createNotice = async (req, res) => {
 
 exports.updateNotice = async (req, res) => {
   const { noticeId } = req.params;
-  const { title, content, target, type, status } = req.body;
+  const { title, content, target, type, status, summary, tags, audienceGrades, attachmentName, attachmentData } = req.body;
 
   try {
+    await ensureNoticeSchema();
+    const normalizedTags = tags === undefined ? undefined : JSON.stringify(normalizeTagsInput(tags));
+    const normalizedAudienceGrades = audienceGrades === undefined ? undefined : JSON.stringify(normalizeAudienceGradesInput(audienceGrades));
     const { rows } = await db.query(
       `UPDATE notice
        SET title = COALESCE($1, title),
            content = COALESCE($2, content),
            target = COALESCE($3, target),
            type = COALESCE($4, type),
-           status = COALESCE($5, status)
-       WHERE notice_id = $6
+           status = COALESCE($5, status),
+           summary = COALESCE($6, summary),
+           tags = COALESCE($7, tags),
+           audience_grades = COALESCE($8, audience_grades),
+           attachment_name = COALESCE($9, attachment_name),
+           attachment_data = COALESCE($10, attachment_data)
+       WHERE notice_id = $11
        RETURNING *`,
-      [title, content, target, type, status, noticeId]
+      [title, content, target, type, status, summary, normalizedTags, normalizedAudienceGrades, attachmentName, attachmentData, noticeId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Notice not found' });
     res.json(mapNotice(rows[0]));
@@ -156,6 +284,7 @@ exports.deleteNotice = async (req, res) => {
   const { noticeId } = req.params;
 
   try {
+    await ensureNoticeSchema();
     await db.query('DELETE FROM notice_delivery WHERE notice_id = $1', [noticeId]);
     const { rowCount } = await db.query('DELETE FROM notice WHERE notice_id = $1', [noticeId]);
     if (!rowCount) return res.status(404).json({ error: 'Notice not found' });
@@ -327,6 +456,7 @@ exports.deleteUser = async (req, res) => {
 
 exports.getPlans = async (req, res) => {
   try {
+    await ensureCoreTables();
     const { rows } = await db.query('SELECT * FROM training_plan ORDER BY updated_at DESC');
     res.json(rows.map(mapPlan));
   } catch (err) {

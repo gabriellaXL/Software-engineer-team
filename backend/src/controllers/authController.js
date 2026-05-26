@@ -2,11 +2,13 @@ const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 
 let profileSchemaReady = false;
+const ALLOWED_GRADES = ['大一', '大二', '大三', '大四'];
 
 async function ensureProfileSchema() {
   if (profileSchemaReady) return;
   await db.query(`
     ALTER TABLE student_profile
+      ADD COLUMN IF NOT EXISTS grade VARCHAR(20),
       ADD COLUMN IF NOT EXISTS class_name VARCHAR(100),
       ADD COLUMN IF NOT EXISTS email VARCHAR(100),
       ADD COLUMN IF NOT EXISTS id_card VARCHAR(50),
@@ -131,9 +133,11 @@ exports.getProfile = async (req, res) => {
 };
 
 exports.updateProfile = async (req, res) => {
+  let client = null;
   try {
     const { userId, role } = req.user;
     await ensureProfileSchema();
+    client = await db.getClient();
 
     const isStudent = role === 'student' || role === 'student_leader';
     const name = normalizeValue(req.body.name);
@@ -143,6 +147,7 @@ exports.updateProfile = async (req, res) => {
     if (isStudent) {
       const studentNo = normalizeValue(req.body.student_no ?? req.body.accountId);
       const className = normalizeValue(req.body.class_name ?? req.body.className);
+      const grade = normalizeValue(req.body.grade);
       const idCard = normalizeValue(req.body.id_card);
       const gender = normalizeValue(req.body.gender);
       const joinPartyDate = normalizeValue(req.body.join_party_date);
@@ -158,8 +163,11 @@ exports.updateProfile = async (req, res) => {
       if (!studentNo) {
         return res.status(400).json({ error: '学号不能为空' });
       }
+      if (!grade || !ALLOWED_GRADES.includes(grade)) {
+        return res.status(400).json({ error: '年级只能选择大一、大二、大三或大四' });
+      }
 
-      const { rows: duplicateRows } = await db.query(
+      const { rows: duplicateRows } = await client.query(
         'SELECT user_id FROM tb_user WHERE account_id = $1 AND user_id <> $2',
         [studentNo, userId]
       );
@@ -167,29 +175,30 @@ exports.updateProfile = async (req, res) => {
         return res.status(409).json({ error: '该学号已被其他账户使用' });
       }
 
-      await db.query('BEGIN');
-      await db.query(
+      await client.query('BEGIN');
+      await client.query(
         'UPDATE tb_user SET account_id = $1 WHERE user_id = $2',
         [studentNo, userId]
       );
-      await db.query(
+      await client.query(
         `UPDATE student_profile
          SET name = $1,
              student_no = $2,
              class_name = $3,
-             phone = $4,
-             email = $5,
-             id_card = $6,
-             gender = $7,
-             join_party_date = $8
-         WHERE user_id = $9`,
-        [name, studentNo, className || '', phone || '', email || '', idCard || '', gender || '', joinPartyDate || null, userId]
+             grade = $4,
+             phone = $5,
+             email = $6,
+             id_card = $7,
+             gender = $8,
+             join_party_date = $9
+         WHERE user_id = $10`,
+        [name, studentNo, className || '', grade, phone || '', email || '', idCard || '', gender || '', joinPartyDate || null, userId]
       );
-      await db.query('COMMIT');
+      await client.query('COMMIT');
       return res.json(await getJoinedProfile(userId, role));
     }
 
-    await db.query(
+    await client.query(
       `UPDATE admin_profile
        SET name = COALESCE($1, name),
            phone = COALESCE($2, phone),
@@ -201,10 +210,12 @@ exports.updateProfile = async (req, res) => {
     res.json(await getJoinedProfile(userId, role));
   } catch (err) {
     try {
-      await db.query('ROLLBACK');
+      if (client) await client.query('ROLLBACK');
     } catch (rollbackError) {
       // Ignore rollback failure and surface the original error.
     }
     res.status(500).json({ error: err.message });
+  } finally {
+    client?.release();
   }
 };
