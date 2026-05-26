@@ -536,6 +536,34 @@ async function fetchTemplates() {
   }
 }
 
+async function getTemplateBytes(template) {
+  if (template.file_data) {
+    const base64Data = template.file_data.split(',')[1];
+    const binaryString = atob(base64Data);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  if (template.file_url) {
+    const res = await fetch(template.file_url, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('模板文件下载失败');
+    const arrayBuffer = await res.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
+  }
+
+  throw new Error('模板文件不存在');
+}
+
+function isDocxTemplate(template) {
+  if (template.file_url) return String(template.file_url).toLowerCase().endsWith('.docx');
+  if (template.file_data) return String(template.file_data).startsWith('data:application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  return false;
+}
+
 window.handleTemplateSelect = async function() {
   const select = document.getElementById("appTemplateSelect");
   const container = document.getElementById("dynamic-fields-container");
@@ -544,17 +572,14 @@ window.handleTemplateSelect = async function() {
   if (!select || !select.value) return;
 
   const template = state.templates.find(t => String(t.id) === select.value);
-  if (!template || !template.file_data) return;
+  if (!template) return;
+  if (!isDocxTemplate(template)) {
+    showToast("该模板不是 DOCX，无法解析标签");
+    return;
+  }
 
   try {
-    const base64Data = template.file_data.split(',')[1];
-    const binaryString = atob(base64Data);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    
+    const bytes = await getTemplateBytes(template);
     const zip = new window.PizZip(bytes);
     const doc = new window.docxtemplater(zip, {
         paragraphLoop: true,
@@ -618,20 +643,17 @@ window.previewFilledTemplate = async function() {
     return;
   }
   const template = state.templates.find(t => String(t.id) === select.value);
-  if (!template || !template.file_data) {
+  if (!template) {
     showToast("无法读取模板内容");
+    return;
+  }
+  if (!isDocxTemplate(template)) {
+    showToast("该模板不是 DOCX，无法生成可回填的预览");
     return;
   }
 
   try {
-    const base64Data = template.file_data.split(',')[1];
-    const binaryString = atob(base64Data);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    
+    const bytes = await getTemplateBytes(template);
     const zip = new window.PizZip(bytes);
     const doc = new window.docxtemplater(zip, {
         paragraphLoop: true,
@@ -1718,16 +1740,32 @@ function renderTemplates() {
 
 window.downloadTemplateDocx = function(id) {
   const template = (state.templates || []).find(t => String(t.id) === String(id));
-  if (template && template.file_data) {
+  if (!template) return showToast("模板不存在");
+
+  if (template.file_url) {
     const a = document.createElement("a");
-    a.href = template.file_data;
-    a.download = `${template.name}.docx`;
+    a.href = `${API_BASE_URL}/templates/${encodeURIComponent(template.id)}/download`;
+    const ext = String(template.file_url).toLowerCase().endsWith('.pdf') ? '.pdf' : '.docx';
+    a.download = `${template.name}${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  } else {
-    showToast("模板文件不存在");
+    return;
   }
+
+  if (template.file_data) {
+    const isPdf = String(template.file_data).startsWith('data:application/pdf');
+    const ext = isPdf ? '.pdf' : '.docx';
+    const a = document.createElement("a");
+    a.href = template.file_data;
+    a.download = `${template.name}${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
+  showToast("模板文件不存在");
 };
 
 function renderAdminView() {
@@ -2160,8 +2198,8 @@ function renderTemplateManage() {
             </select>
           </label>
           <label class="field full">
-            <span>Word模板文件 (.docx, 需带 {变量名} 标签)</span>
-            <input type="file" name="file" accept=".docx" required />
+            <span>模板文件（.docx 支持回填标签；.pdf 仅支持下载）</span>
+            <input type="file" name="file" accept=".docx,.pdf" required />
           </label>
           <div class="toolbar field full"><button class="primary-button" type="submit">${icon("upload")}上传模板</button></div>
         </form>
