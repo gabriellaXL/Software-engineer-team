@@ -46,13 +46,17 @@ const state = {
   analysisError: "",
   notices: [],
   users: [],
+  userRecords: [],
   planRows: [],
+  planRecords: [],
   basicError: "",
   noticeFilter: "全部",
   selectedApproval: "APP-202605-001",
   adminApprovalView: "list",
   approvalFilter: "全部",
-  mobileMenuOpen: false
+  mobileMenuOpen: false,
+  editingUserId: null,
+  editingPlanId: null
 };
 
 const params = new URLSearchParams(window.location.search);
@@ -412,7 +416,9 @@ async function fetchBasicData(options = {}) {
   if (!state.token) {
     state.notices = [];
     state.users = [];
+    state.userRecords = [];
     state.planRows = [];
+    state.planRecords = [];
     return;
   }
 
@@ -432,9 +438,11 @@ async function fetchBasicData(options = {}) {
     });
 
     state.notices = Array.isArray(payloads[0]) ? payloads[0] : [];
+    state.planRecords = Array.isArray(payloads[1]) ? payloads[1] : [];
     state.planRows = Array.isArray(payloads[1])
       ? payloads[1].map((item) => item.row || [item.name, item.grade, item.statusName || item.status, item.updatedAt])
       : [];
+    state.userRecords = Array.isArray(payloads[2]) ? payloads[2] : [];
     state.users = Array.isArray(payloads[2])
       ? payloads[2].map((item) => item.row || [item.accountId || item.account_id, item.name, item.roleName || item.role, item.organization, item.statusText || item.status])
       : [];
@@ -443,6 +451,83 @@ async function fetchBasicData(options = {}) {
     state.basicError = error.message;
     if (!options.silent) showToast(`基础管理接口异常：${error.message}`);
   }
+}
+
+function fallbackUserRecords() {
+  return users.map((row, index) => ({
+    id: `mock-user-${index}`,
+    accountId: row[0],
+    account_id: row[0],
+    name: row[1],
+    roleName: row[2],
+    organization: row[3],
+    statusText: row[4],
+    role: row[2] === "普通学生" ? "student" : row[2] === "班团骨干" ? "student_leader" : row[2] === "学院领导" ? "leader" : "admin",
+    status: row[4] === "启用" ? "active" : "inactive",
+    major: row[3].includes("/") ? row[3].split("/")[0].trim() : "",
+    grade: row[3].includes("/") ? row[3].split("/")[1].trim() : "",
+    department: row[3].includes("/") ? "" : row[3]
+  }));
+}
+
+function fallbackPlanRecords() {
+  return planRows.map((row, index) => ({
+    id: `mock-plan-${index}`,
+    name: row[0],
+    grade: row[1],
+    statusName: row[2],
+    status: row[2] === "已发布" ? "published" : row[2] === "待审核" ? "pending" : "draft",
+    updatedAt: row[3],
+    major: ""
+  }));
+}
+
+async function saveUserRecord(payload) {
+  const isEditing = Boolean(state.editingUserId);
+  const url = isEditing ? `${API_BASE_URL}/basic/users/${encodeURIComponent(state.editingUserId)}` : `${API_BASE_URL}/basic/users`;
+  const method = isEditing ? "PUT" : "POST";
+  const response = await fetch(url, {
+    method,
+    headers: apiHeaders(true),
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "用户保存失败");
+  return data;
+}
+
+async function deleteUserRecord(userId) {
+  const response = await fetch(`${API_BASE_URL}/basic/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: apiHeaders()
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "用户删除失败");
+  return data;
+}
+
+async function savePlanRecord(payload) {
+  const isEditing = Boolean(state.editingPlanId);
+  const url = isEditing ? `${API_BASE_URL}/basic/plans/${encodeURIComponent(state.editingPlanId)}` : `${API_BASE_URL}/basic/plans`;
+  const method = isEditing ? "PUT" : "POST";
+  const response = await fetch(url, {
+    method,
+    headers: apiHeaders(true),
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "培养方案保存失败");
+  return data;
+}
+
+async function deletePlanRecord(planId) {
+  const response = await fetch(`${API_BASE_URL}/basic/plans/${encodeURIComponent(planId)}`, {
+    method: "DELETE",
+    headers: apiHeaders()
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "培养方案删除失败");
+  return data;
 }
 
 async function savePolicy(payload) {
@@ -1845,21 +1930,75 @@ function renderAdminDashboard() {
 }
 
 function renderUserManage() {
-  const userRows = state.users.length ? state.users : users;
+  const userRecords = state.userRecords.length ? state.userRecords : fallbackUserRecords();
+  const editingUser = userRecords.find((item) => String(item.id || item.user_id) === String(state.editingUserId));
   return adminPageWithTable(
     "用户管理",
     "统一维护学生、老师与 4 级权限体系。",
     ["导出名单", "新建用户"],
-    ["账号", "姓名", "角色", "组织/专业", "状态"],
-    userRows.map((row) => [row[0], row[1], badge(row[2], row[2] === "普通学生" ? "neutral" : "success"), row[3], badge(row[4], "success")]),
+    ["账号", "姓名", "角色", "组织/专业", "状态", "操作"],
+    userRecords.map((item) => [
+      escapeHtml(item.accountId || item.account_id || "-"),
+      escapeHtml(item.name || "-"),
+      badge(escapeHtml(item.roleName || item.role || "-"), (item.role || "").includes("student") ? "neutral" : "success"),
+      escapeHtml(item.organization || [item.major, item.grade].filter(Boolean).join(" / ") || item.department || "-"),
+      badge(escapeHtml(item.statusText || item.status || "-"), item.status === "active" ? "success" : "warning"),
+      `${actionButton("编辑", "user-edit", item.id || item.user_id)} ${actionButton("删除", "user-delete", item.id || item.user_id)}`
+    ]),
     `
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">权限配置</p><h2>角色资源授权</h2></div></div>
-        <form class="form-grid" data-form="admin">
-          ${field("角色", "select", ["学院领导", "管理老师", "班团骨干", "普通学生"])}
-          ${field("资源", "input", "审批管理 / 知识库 / 通知")}
-          ${field("操作范围", "textarea", "查看、编辑、审核、导入导出", true)}
-          <div class="toolbar field full"><button class="primary-button" type="submit">${icon("check")}保存权限</button></div>
+        <div class="panel-head"><div><p class="eyebrow">${editingUser ? "编辑用户" : "新建用户"}</p><h2>账号信息</h2></div></div>
+        <form class="form-grid" data-form="user">
+          <label class="field">
+            <span>账号</span>
+            <input name="accountId" type="text" placeholder="请输入账号" value="${escapeHtml(editingUser?.accountId || editingUser?.account_id || "")}" ${editingUser ? "readonly" : ""} required />
+          </label>
+          <label class="field">
+            <span>${editingUser ? "重置密码（可选）" : "初始密码"}</span>
+            <input name="password" type="text" placeholder="${editingUser ? "留空则不修改密码" : "请输入初始密码"}" ${editingUser ? "" : "required"} />
+          </label>
+          <label class="field">
+            <span>姓名</span>
+            <input name="name" type="text" placeholder="请输入姓名" value="${escapeHtml(editingUser?.name || "")}" />
+          </label>
+          <label class="field">
+            <span>角色</span>
+            <select name="role">
+              ${[
+                ["student", "普通学生"],
+                ["student_leader", "班团骨干"],
+                ["admin", "管理老师"],
+                ["leader", "学院领导"]
+              ].map(([value, label]) => `<option value="${value}" ${value === (editingUser?.role || "student") ? "selected" : ""}>${label}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field">
+            <span>状态</span>
+            <select name="status">
+              <option value="active" ${editingUser?.status !== "inactive" ? "selected" : ""}>启用</option>
+              <option value="inactive" ${editingUser?.status === "inactive" ? "selected" : ""}>停用</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>电话</span>
+            <input name="phone" type="text" placeholder="请输入联系电话" value="${escapeHtml(editingUser?.phone || "")}" />
+          </label>
+          <label class="field">
+            <span>专业</span>
+            <input name="major" type="text" placeholder="学生角色可填写专业" value="${escapeHtml(editingUser?.major || "")}" />
+          </label>
+          <label class="field">
+            <span>年级</span>
+            <input name="grade" type="text" placeholder="如 2024级" value="${escapeHtml(editingUser?.grade || "")}" />
+          </label>
+          <label class="field full">
+            <span>部门</span>
+            <input name="department" type="text" placeholder="老师/领导角色可填写部门" value="${escapeHtml(editingUser?.department || "")}" />
+          </label>
+          <div class="toolbar field full">
+            ${editingUser ? `<button class="ghost-button" type="button" data-action="user-form-reset">取消编辑</button>` : ""}
+            <button class="primary-button" type="submit">${icon("check")}${editingUser ? "保存用户" : "创建用户"}</button>
+          </div>
         </form>
       </div>
     `
@@ -2273,14 +2412,50 @@ window.deleteTemplate = async function(id) {
 };
 
 function renderTrainingManage() {
-  const rows = state.planRows.length ? state.planRows : planRows;
+  const planRecords = state.planRecords.length ? state.planRecords : fallbackPlanRecords();
+  const editingPlan = planRecords.find((item) => String(item.id || item.plan_id) === String(state.editingPlanId));
   return adminPageWithTable(
     "培养方案",
     "维护专业培养方案、课程模块要求和学分比对规则。",
     ["导入方案", "新建方案"],
     ["方案名称", "适用年级", "状态", "最近更新", "操作"],
-    rows.map((row) => [row[0], row[1], badge(row[2], row[2] === "已发布" ? "success" : row[2] === "待审核" ? "warning" : "neutral"), row[3], actionButton("查看详情")]),
+    planRecords.map((item) => [
+      escapeHtml(item.name || "-"),
+      escapeHtml(item.grade || "-"),
+      badge(escapeHtml(item.statusName || item.status || "-"), item.status === "published" ? "success" : item.status === "pending" ? "warning" : "neutral"),
+      escapeHtml(item.updatedAt || "-"),
+      `${actionButton("编辑", "plan-edit", item.id || item.plan_id)} ${actionButton("删除", "plan-delete", item.id || item.plan_id)}`
+    ]),
     `
+      <div class="panel">
+        <div class="panel-head"><div><p class="eyebrow">${editingPlan ? "编辑方案" : "新建方案"}</p><h2>方案信息</h2></div></div>
+        <form class="form-grid" data-form="plan">
+          <label class="field full">
+            <span>方案名称</span>
+            <input name="name" type="text" placeholder="请输入培养方案名称" value="${escapeHtml(editingPlan?.name || "")}" required />
+          </label>
+          <label class="field">
+            <span>适用年级</span>
+            <input name="grade" type="text" placeholder="如 2024级" value="${escapeHtml(editingPlan?.grade || "")}" required />
+          </label>
+          <label class="field">
+            <span>专业方向</span>
+            <input name="major" type="text" placeholder="请输入专业或方向" value="${escapeHtml(editingPlan?.major || "")}" />
+          </label>
+          <label class="field full">
+            <span>状态</span>
+            <select name="status">
+              <option value="draft" ${editingPlan?.status === "draft" ? "selected" : ""}>草稿</option>
+              <option value="pending" ${editingPlan?.status === "pending" ? "selected" : ""}>待审核</option>
+              <option value="published" ${editingPlan?.status === "published" ? "selected" : ""}>已发布</option>
+            </select>
+          </label>
+          <div class="toolbar field full">
+            ${editingPlan ? `<button class="ghost-button" type="button" data-action="plan-form-reset">取消编辑</button>` : ""}
+            <button class="primary-button" type="submit">${icon("check")}${editingPlan ? "保存方案" : "创建方案"}</button>
+          </div>
+        </form>
+      </div>
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">课程模块</p><h2>学分要求</h2></div></div>
         <div class="credit-grid">
@@ -2772,6 +2947,56 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const userEdit = event.target.closest("[data-action='user-edit']");
+  if (userEdit) {
+    state.editingUserId = userEdit.dataset.id;
+    render();
+    showToast("已载入该用户，可在右侧表单维护。");
+    return;
+  }
+
+  const userDelete = event.target.closest("[data-action='user-delete']");
+  if (userDelete) {
+    const userId = userDelete.dataset.id;
+    if (confirm("确定要删除该用户吗？该操作不可撤销。")) {
+      try {
+        await deleteUserRecord(userId);
+        await fetchBasicData({ silent: true });
+        if (String(state.editingUserId) === String(userId)) state.editingUserId = null;
+        render();
+        showToast("用户已删除并刷新列表。");
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+    return;
+  }
+
+  const planEdit = event.target.closest("[data-action='plan-edit']");
+  if (planEdit) {
+    state.editingPlanId = planEdit.dataset.id;
+    render();
+    showToast("已载入该培养方案，可在右侧表单维护。");
+    return;
+  }
+
+  const planDelete = event.target.closest("[data-action='plan-delete']");
+  if (planDelete) {
+    const planId = planDelete.dataset.id;
+    if (confirm("确定要删除该培养方案吗？")) {
+      try {
+        await deletePlanRecord(planId);
+        await fetchBasicData({ silent: true });
+        if (String(state.editingPlanId) === String(planId)) state.editingPlanId = null;
+        render();
+        showToast("培养方案已删除并刷新列表。");
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+    return;
+  }
+
   const noticeFilter = event.target.closest("[data-notice-filter]");
   if (noticeFilter) {
     state.noticeFilter = noticeFilter.dataset.noticeFilter;
@@ -2826,6 +3051,16 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  if (action === "user-form-reset" || action === "用户管理-primary") {
+    state.editingUserId = null;
+    render();
+    return;
+  }
+  if (action === "plan-form-reset" || action === "培养方案-primary") {
+    state.editingPlanId = null;
+    render();
+    return;
+  }
   // === 第三步：处理退出登录 ===
   if (action === "logout") {
     state.isAuthenticated = false;
@@ -2834,6 +3069,8 @@ document.addEventListener("click", async (event) => {
     state.userProfile = null;
     state.mobileMenuOpen = false;
     state.editingPolicyId = null;
+    state.editingUserId = null;
+    state.editingPlanId = null;
     localStorage.removeItem('sds_token');
     localStorage.removeItem('sds_user');
     localStorage.removeItem('sds_role');
@@ -3049,6 +3286,68 @@ document.addEventListener("submit", async (event) => {
       form.reset();
       render();
       showToast("通知已发布并刷新列表。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+
+  if (form.dataset.form === "user") {
+    const formData = new FormData(form);
+    const payload = {
+      accountId: formData.get("accountId")?.toString().trim(),
+      password: formData.get("password")?.toString().trim(),
+      name: formData.get("name")?.toString().trim(),
+      role: formData.get("role")?.toString() || "student",
+      status: formData.get("status")?.toString() || "active",
+      major: formData.get("major")?.toString().trim(),
+      grade: formData.get("grade")?.toString().trim(),
+      phone: formData.get("phone")?.toString().trim(),
+      department: formData.get("department")?.toString().trim()
+    };
+    if (!payload.accountId) {
+      showToast("请填写账号。");
+      return;
+    }
+    if (!state.editingUserId && !payload.password) {
+      showToast("新建用户时请填写初始密码。");
+      return;
+    }
+    if (state.editingUserId && !payload.password) {
+      delete payload.password;
+    }
+    try {
+      await saveUserRecord(payload);
+      await fetchBasicData({ silent: true });
+      state.editingUserId = null;
+      form.reset();
+      render();
+      showToast("用户信息已保存并刷新列表。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+
+  if (form.dataset.form === "plan") {
+    const formData = new FormData(form);
+    const payload = {
+      name: formData.get("name")?.toString().trim(),
+      grade: formData.get("grade")?.toString().trim(),
+      major: formData.get("major")?.toString().trim(),
+      status: formData.get("status")?.toString() || "draft"
+    };
+    if (!payload.name || !payload.grade) {
+      showToast("请完整填写方案名称和适用年级。");
+      return;
+    }
+    try {
+      await savePlanRecord(payload);
+      await fetchBasicData({ silent: true });
+      state.editingPlanId = null;
+      form.reset();
+      render();
+      showToast("培养方案已保存并刷新列表。");
     } catch (error) {
       showToast(error.message);
     }
