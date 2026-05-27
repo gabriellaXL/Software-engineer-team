@@ -1,9 +1,21 @@
+const fs = require('fs');
+const path = require('path');
 const db = require('../config/db');
 
 let ensured = false;
 
 async function ensureCoreTables() {
   if (ensured) return;
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS template_file (
+      template_id VARCHAR(50) PRIMARY KEY,
+      name VARCHAR(100),
+      type VARCHAR(50),
+      file_url VARCHAR(255),
+      version VARCHAR(20)
+    )
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS party_process_node (
@@ -158,7 +170,29 @@ async function ensureCoreTables() {
       ADD COLUMN IF NOT EXISTS attachment_url TEXT
   `);
 
+  await restoreUploadedTemplates();
+
   ensured = true;
+}
+
+async function restoreUploadedTemplates() {
+  const templatesDir = path.join(__dirname, '..', '..', 'uploads', 'templates');
+  if (!fs.existsSync(templatesDir)) return;
+
+  const templateFiles = fs
+    .readdirSync(templatesDir)
+    .filter((fileName) => fileName.toLowerCase().endsWith('.docx'));
+
+  for (const fileName of templateFiles) {
+    const templateId = path.basename(fileName, path.extname(fileName));
+    const displayName = templateId.startsWith('TPL-') ? `Recovered template-${templateId}` : templateId;
+    await db.query(
+      `INSERT INTO template_file (template_id, name, type, file_url, version)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (template_id) DO NOTHING`,
+      [templateId, displayName, 'template', `/uploads/templates/${fileName}`, '1.0']
+    );
+  }
 }
 
 module.exports = {
