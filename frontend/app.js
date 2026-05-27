@@ -1028,6 +1028,16 @@ async function deletePlanRecord(planId) {
   return data;
 }
 
+async function deleteNoticeRecord(noticeId) {
+  const response = await fetch(`${API_BASE_URL}/basic/notices/${encodeURIComponent(noticeId)}`, {
+    method: "DELETE",
+    headers: apiHeaders()
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "通知删除失败");
+  return data;
+}
+
 async function savePolicy(payload) {
   const response = await fetch(`${API_BASE_URL}/policies/maintain`, {
     method: "POST",
@@ -2838,6 +2848,7 @@ function renderKnowledgeManage() {
 
 function renderNoticeManage() {
   const availableTags = getAvailableNoticeTags();
+  const noticeRows = getNoticeRows();
   return `
     ${pageHead("通知管理", "发布通知时可选择已有标签、自定义标签、填写简介并上传附件。", [
       ["preview-notice", "预览通知", "file", "ghost-button"],
@@ -2909,6 +2920,29 @@ function renderNoticeManage() {
           <button class="ghost-button" data-action="notice-save-draft">${icon("file")}存为草稿</button>
           <button class="primary-button" data-action="publish-notice">${icon("check")}确认发布</button>
         </div>
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div><p class="eyebrow">已发布通知</p><h2>通知列表</h2></div>
+      </div>
+      <div class="notice-list">
+        ${noticeRows.length ? noticeRows.map((item) => `
+          <article class="list-card">
+            <header>
+              <h3>${escapeHtml(item.title || "未命名通知")}</h3>
+              ${badge(escapeHtml(item.status || "published"), item.status === "published" ? "success" : "neutral")}
+            </header>
+            <p>${escapeHtml(item.summary || item.text || "暂无通知简介")}</p>
+            <div class="list-meta">
+              <span>${escapeHtml(item.time || "")}</span>
+              <span>${escapeHtml(item.target || "全体学生")}</span>
+            </div>
+            <div class="toolbar" style="margin-top:12px">
+              <button type="button" class="ghost-button" data-action="notice-delete" data-id="${escapeHtml(item.id)}">${icon("x")}删除</button>
+            </div>
+          </article>
+        `).join("") : `<article class="list-card"><h3>暂无通知</h3><p>当前没有已发布通知。</p></article>`}
       </div>
     </section>
   `;
@@ -4373,6 +4407,22 @@ document.addEventListener("click", async (event) => {
         }
         render();
         showToast("培养方案已删除并刷新列表。");
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+    return;
+  }
+
+  const noticeDelete = event.target.closest("[data-action='notice-delete']");
+  if (noticeDelete) {
+    const noticeId = noticeDelete.dataset.id;
+    if (confirm("确定要删除该通知吗？删除后学生端将不再显示该通知。")) {
+      try {
+        await deleteNoticeRecord(noticeId);
+        await fetchBasicData({ silent: true });
+        render();
+        showToast("通知已删除并刷新列表。");
       } catch (error) {
         showToast(error.message);
       }
