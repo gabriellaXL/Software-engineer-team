@@ -1,5 +1,6 @@
 const XLSX = require('xlsx');
 const db = require('../config/db');
+const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 
 let noticeColumnsReady = false;
 
@@ -126,6 +127,25 @@ function isStudentRole(role) {
 function formatDate(value) {
   if (!value) return '';
   return String(value).slice(0, 10);
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  return String(value).replace('T', ' ').slice(0, 16);
+}
+
+function normalizeDateTimeInput(value) {
+  if (value === undefined || value === null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error('节点日期时间格式无效');
+  }
+
+  const normalized = raw.replace('T', ' ');
+  return normalized.length === 16 ? `${normalized}:00` : normalized;
 }
 
 async function runInTransaction(task) {
@@ -276,19 +296,29 @@ const IMPORT_EXPORT_TYPES = {
       { key: 'processType', label: '流程类型' },
       { key: 'nodeName', label: '节点名称' },
       { key: 'sequence', label: '顺序' },
+      { key: 'scheduledAt', label: '节点时间' },
+      { key: 'nodeDetail', label: '详细说明' },
+      { key: 'attachmentName', label: '附件名称' },
+      { key: 'attachmentData', label: '附件内容' },
       { key: 'reminderRule', label: '提醒规则' }
     ],
     async exportRows() {
+      await ensureCoreTables();
       const { rows } = await db.query('SELECT * FROM party_process_node ORDER BY process_type, sequence ASC');
       return rows.map((row) => ({
         nodeId: row.node_id,
         processType: row.process_type,
         nodeName: row.node_name,
         sequence: row.sequence,
+        scheduledAt: formatDateTime(row.scheduled_at),
+        nodeDetail: row.node_detail || '',
+        attachmentName: row.attachment_name || '',
+        attachmentData: row.attachment_data || '',
         reminderRule: row.reminder_rule || ''
       }));
     },
     async importRows(rows) {
+      await ensureCoreTables();
       const result = { imported: 0, created: 0, updated: 0, failed: 0, errors: [] };
 
       for (let index = 0; index < rows.length; index += 1) {
@@ -297,6 +327,10 @@ const IMPORT_EXPORT_TYPES = {
         const nodeName = String(row.nodeName || '').trim();
         const sequence = Number(row.sequence);
         const nodeId = String(row.nodeId || '').trim();
+        const scheduledAt = normalizeDateTimeInput(row.scheduledAt);
+        const nodeDetail = String(row.nodeDetail || '').trim();
+        const attachmentName = String(row.attachmentName || '').trim();
+        const attachmentData = String(row.attachmentData || '');
 
         if (!nodeName || !Number.isFinite(sequence)) {
           result.failed += 1;
@@ -322,16 +356,16 @@ const IMPORT_EXPORT_TYPES = {
             if (existing) {
               await db.query(
                 `UPDATE party_process_node
-                 SET process_type = $1, node_name = $2, sequence = $3, reminder_rule = $4
-                 WHERE node_id = $5`,
-                [processType, nodeName, sequence, row.reminderRule || '', existing.node_id]
+                 SET process_type = $1, node_name = $2, sequence = $3, scheduled_at = $4, node_detail = $5, attachment_name = $6, attachment_data = $7, reminder_rule = $8
+                 WHERE node_id = $9`,
+                [processType, nodeName, sequence, scheduledAt, nodeDetail, attachmentName, attachmentData, row.reminderRule || '', existing.node_id]
               );
               result.updated += 1;
             } else {
               await db.query(
-                `INSERT INTO party_process_node (node_id, process_type, node_name, sequence, reminder_rule)
-                 VALUES ($1, $2, $3, $4, $5)`,
-                [nodeId || `NODE-${Date.now()}-${index}`, processType, nodeName, sequence, row.reminderRule || '']
+                `INSERT INTO party_process_node (node_id, process_type, node_name, sequence, scheduled_at, node_detail, attachment_name, attachment_data, reminder_rule)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [nodeId || `NODE-${Date.now()}-${index}`, processType, nodeName, sequence, scheduledAt, nodeDetail, attachmentName, attachmentData, row.reminderRule || '']
               );
               result.created += 1;
             }

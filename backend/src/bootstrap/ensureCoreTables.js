@@ -6,6 +6,48 @@ async function ensureCoreTables() {
   if (ensured) return;
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS party_process_node (
+      node_id VARCHAR(50) PRIMARY KEY,
+      process_type VARCHAR(50),
+      node_name VARCHAR(100),
+      sequence INTEGER,
+      reminder_rule VARCHAR(255),
+      scheduled_at TIMESTAMP,
+      node_detail TEXT,
+      attachment_name VARCHAR(255),
+      attachment_data TEXT
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS student_process_record (
+      record_id VARCHAR(50) PRIMARY KEY,
+      student_id VARCHAR(50),
+      node_id VARCHAR(50) REFERENCES party_process_node(node_id),
+      status VARCHAR(20),
+      completed_time TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS party_process_submission (
+      submission_id VARCHAR(50) PRIMARY KEY,
+      student_id VARCHAR(50),
+      node_id VARCHAR(50) REFERENCES party_process_node(node_id),
+      material_type VARCHAR(100),
+      description TEXT,
+      attachment_name VARCHAR(255),
+      attachment_data TEXT,
+      status VARCHAR(20),
+      review_comment TEXT,
+      reviewed_at TIMESTAMP,
+      created_at TIMESTAMP,
+      updated_at TIMESTAMP,
+      submitted_at TIMESTAMP
+    )
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS notice (
       notice_id VARCHAR(50) PRIMARY KEY,
       title VARCHAR(200),
@@ -50,6 +92,38 @@ async function ensureCoreTables() {
       module_name VARCHAR(100),
       credit_required INTEGER
     )
+  `);
+
+  await db.query(`
+    ALTER TABLE party_process_node
+      ADD COLUMN IF NOT EXISTS process_type VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS node_name VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS sequence INTEGER,
+      ADD COLUMN IF NOT EXISTS reminder_rule VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS node_detail TEXT,
+      ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS attachment_data TEXT
+  `);
+
+  await db.query(`
+    ALTER TABLE student_process_record
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS completed_time TIMESTAMP
+  `);
+
+  await db.query(`
+    ALTER TABLE party_process_submission
+      ADD COLUMN IF NOT EXISTS material_type VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS description TEXT,
+      ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS attachment_data TEXT,
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS review_comment TEXT,
+      ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP
   `);
 
   await db.query(`

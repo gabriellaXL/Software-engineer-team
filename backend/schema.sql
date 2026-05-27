@@ -62,7 +62,11 @@ CREATE TABLE party_process_node (
     process_type VARCHAR(50),
     node_name VARCHAR(100),
     sequence INTEGER,
-    reminder_rule VARCHAR(100)
+    reminder_rule VARCHAR(100),
+    scheduled_at TIMESTAMP,
+    node_detail TEXT,
+    attachment_name VARCHAR(255),
+    attachment_data TEXT
 );
 
 CREATE TABLE student_process_record (
@@ -71,6 +75,22 @@ CREATE TABLE student_process_record (
     node_id VARCHAR(50) REFERENCES party_process_node(node_id),
     status VARCHAR(20),
     completed_time TIMESTAMP
+);
+
+CREATE TABLE party_process_submission (
+    submission_id VARCHAR(50) PRIMARY KEY,
+    student_id VARCHAR(50) REFERENCES student_profile(student_id),
+    node_id VARCHAR(50) REFERENCES party_process_node(node_id),
+    material_type VARCHAR(100),
+    description TEXT,
+    attachment_name VARCHAR(255),
+    attachment_data TEXT,
+    status VARCHAR(20),
+    review_comment TEXT,
+    reviewed_at TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    submitted_at TIMESTAMP
 );
 
 CREATE TABLE application (

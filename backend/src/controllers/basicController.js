@@ -436,6 +436,7 @@ exports.deleteUser = async (req, res) => {
         await db.query('DELETE FROM analysis_result WHERE transcript_id = $1', [transcript.transcript_id]);
       }
       await db.query('DELETE FROM notice_delivery WHERE student_id = $1', [student.student_id]);
+      await db.query('DELETE FROM party_process_submission WHERE student_id = $1', [student.student_id]);
       await db.query('DELETE FROM student_process_record WHERE student_id = $1', [student.student_id]);
       await db.query('DELETE FROM transcript_task WHERE student_id = $1', [student.student_id]);
       await db.query('DELETE FROM application WHERE student_id = $1', [student.student_id]);
