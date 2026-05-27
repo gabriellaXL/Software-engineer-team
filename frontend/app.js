@@ -80,6 +80,7 @@ const state = {
   mobileMenuOpen: false,
   editingUserId: null,
   editingPlanId: null,
+  planDraftAttachment: null,
   importPreview: null,
   importResult: null,
   isImporting: false
@@ -831,7 +832,9 @@ function fallbackPlanRecords() {
     statusName: row[2],
     status: row[2] === "已发布" ? "published" : row[2] === "待审核" ? "pending" : "draft",
     updatedAt: row[3],
-    major: ""
+    major: "",
+    attachmentName: "",
+    attachmentData: ""
   }));
 }
 
@@ -2238,6 +2241,8 @@ function renderNewApplication() {
 
 function renderAnalysis() {
   const analysisCredits = getAnalysisCredits();
+  const publishedPlans = (state.planRecords.length ? state.planRecords : fallbackPlanRecords())
+    .filter((item) => !item.status || item.status === "published" || item.statusName === "已发布");
   return `
     ${pageHead("成绩分析", "上传成绩单后与培养方案自动比对，生成缺失模块、学分达成度和选课建议。", [
       ["upload-transcript", "上传成绩单", "upload", "primary-button"]
@@ -2272,6 +2277,33 @@ function renderAnalysis() {
         <div class="credit-grid">
           ${analysisCredits.map((item) => creditRow(item)).join("")}
         </div>
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">培养方案查看</p>
+          <h2>可下载培养方案</h2>
+          <p>学生可在成绩分析前查看本年级、专业对应的培养方案文件。</p>
+        </div>
+      </div>
+      <div class="template-list">
+        ${publishedPlans.length ? publishedPlans.map((plan) => `
+          <article class="list-card">
+            <header>
+              <div>
+                <h3>${escapeHtml(plan.name || "-")}</h3>
+                <p>${escapeHtml([plan.major, plan.grade].filter(Boolean).join(" / ") || "适用范围未填写")}</p>
+              </div>
+              ${badge(escapeHtml(plan.statusName || "已发布"), "success")}
+            </header>
+            <div class="toolbar">
+              ${plan.attachmentData
+                ? `<button type="button" class="secondary-button" onclick="downloadPlanAttachment('${escapeHtml(plan.id || plan.plan_id)}')">${icon("download")}下载培养方案</button>`
+                : `<span class="muted-text">管理员尚未上传文件</span>`}
+            </div>
+          </article>
+        `).join("") : `<p class="muted-text">暂无已发布培养方案，请联系管理员上传并发布。</p>`}
       </div>
     </section>
     <section class="grid two" style="margin-top:14px">
@@ -3061,6 +3093,20 @@ window.downloadAttachment = function(id) {
   }
 };
 
+window.downloadPlanAttachment = function(id) {
+  const plan = (state.planRecords || fallbackPlanRecords()).find((item) => String(item.id || item.plan_id) === String(id));
+  if (!plan?.attachmentData) {
+    showToast("该培养方案暂未上传附件");
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = plan.attachmentData;
+  a.download = plan.attachmentName || `${id}-培养方案`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
+
 window.downloadBase64PDF = function(id) {
   const application = (state.applications || []).find(a => String(a.id) === String(id));
   if (application && application.fileData) {
@@ -3204,11 +3250,12 @@ function renderTrainingManage() {
     "培养方案",
     "维护专业培养方案、课程模块要求和学分比对规则。",
     ["导入方案", "新建方案"],
-    ["方案名称", "适用年级", "状态", "最近更新", "操作"],
+    ["方案名称", "适用年级", "状态", "培养方案文件", "最近更新", "操作"],
     planRecords.map((item) => [
       escapeHtml(item.name || "-"),
       escapeHtml(item.grade || "-"),
       badge(escapeHtml(item.statusName || item.status || "-"), item.status === "published" ? "success" : item.status === "pending" ? "warning" : "neutral"),
+      item.attachmentName ? escapeHtml(item.attachmentName) : `<span class="muted-text">未上传</span>`,
       escapeHtml(item.updatedAt || "-"),
       `${actionButton("编辑", "plan-edit", item.id || item.plan_id)} ${actionButton("删除", "plan-delete", item.id || item.plan_id)}`
     ]),
@@ -3235,6 +3282,11 @@ function renderTrainingManage() {
               <option value="pending" ${editingPlan?.status === "pending" ? "selected" : ""}>待审核</option>
               <option value="published" ${editingPlan?.status === "published" ? "selected" : ""}>已发布</option>
             </select>
+          </label>
+          <label class="field full">
+            <span>培养方案文件</span>
+            <input name="attachment" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" />
+            <small id="planAttachmentHint" class="muted-text">${(state.planDraftAttachment?.name || editingPlan?.attachmentName) ? `当前文件：${escapeHtml(state.planDraftAttachment?.name || editingPlan?.attachmentName)}` : "上传后学生可在成绩分析页下载查看。"}</small>
           </label>
           <div class="toolbar field full">
             ${editingPlan ? `<button class="ghost-button" type="button" data-action="plan-form-reset">取消编辑</button>` : ""}
@@ -4270,6 +4322,11 @@ document.addEventListener("click", async (event) => {
   const planEdit = event.target.closest("[data-action='plan-edit']");
   if (planEdit) {
     state.editingPlanId = planEdit.dataset.id;
+    const planRecords = state.planRecords.length ? state.planRecords : fallbackPlanRecords();
+    const editingPlan = planRecords.find((item) => String(item.id || item.plan_id) === String(state.editingPlanId));
+    state.planDraftAttachment = editingPlan?.attachmentName
+      ? { name: editingPlan.attachmentName, data: editingPlan.attachmentData || "" }
+      : null;
     render();
     showToast("已载入该培养方案，可在右侧表单维护。");
     return;
@@ -4282,7 +4339,10 @@ document.addEventListener("click", async (event) => {
       try {
         await deletePlanRecord(planId);
         await fetchBasicData({ silent: true });
-        if (String(state.editingPlanId) === String(planId)) state.editingPlanId = null;
+        if (String(state.editingPlanId) === String(planId)) {
+          state.editingPlanId = null;
+          state.planDraftAttachment = null;
+        }
         render();
         showToast("培养方案已删除并刷新列表。");
       } catch (error) {
@@ -4663,6 +4723,7 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "plan-form-reset" || action === "培养方案-primary") {
     state.editingPlanId = null;
+    state.planDraftAttachment = null;
     render();
     return;
   }
@@ -4910,6 +4971,14 @@ document.addEventListener("change", async (event) => {
     state.noticeDraftAttachment = file ? { name: file.name, data: "" } : null;
     updateNoticeAttachmentHint();
   }
+  if (event.target.matches('form[data-form="plan"] input[name="attachment"]')) {
+    const file = event.target.files?.[0] || null;
+    state.planDraftAttachment = file ? { name: file.name, data: "" } : null;
+    const hint = document.getElementById("planAttachmentHint");
+    if (hint) {
+      hint.textContent = file ? `当前文件：${file.name}` : "上传后学生可在成绩分析页下载查看。";
+    }
+  }
 });
 
 document.addEventListener("submit", async (event) => {
@@ -5120,11 +5189,20 @@ document.addEventListener("submit", async (event) => {
 
   if (form.dataset.form === "plan") {
     const formData = new FormData(form);
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
+    let attachmentName = state.planDraftAttachment?.name || "";
+    let attachmentData = state.planDraftAttachment?.data || "";
+    if (attachmentFile) {
+      attachmentData = await fileToDataUrl(attachmentFile);
+      attachmentName = attachmentFile.name;
+    }
     const payload = {
       name: formData.get("name")?.toString().trim(),
       grade: formData.get("grade")?.toString().trim(),
       major: formData.get("major")?.toString().trim(),
-      status: formData.get("status")?.toString() || "draft"
+      status: formData.get("status")?.toString() || "draft",
+      attachmentName,
+      attachmentData
     };
     if (!payload.name || !payload.grade) {
       showToast("请完整填写方案名称和适用年级。");
@@ -5134,6 +5212,7 @@ document.addEventListener("submit", async (event) => {
       await savePlanRecord(payload);
       await fetchBasicData({ silent: true });
       state.editingPlanId = null;
+      state.planDraftAttachment = null;
       form.reset();
       render();
       showToast("培养方案已保存并刷新列表。");
