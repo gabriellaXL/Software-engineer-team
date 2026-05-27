@@ -81,10 +81,7 @@ const state = {
   mobileMenuOpen: false,
   editingUserId: null,
   editingPlanId: null,
-  planDraftAttachment: null,
-  importPreview: null,
-  importResult: null,
-  isImporting: false
+  planDraftAttachment: null
 };
 
 const DEFAULT_NOTICE_TAGS = ["就业", "党团", "后勤", "毕业生", "奖助", "安全", "活动"];
@@ -125,8 +122,7 @@ const adminNav = [
   ["processConfig", "流程配置", "route"],
   ["approval", "审批管理", "shield"],
   ["templateManage", "模板管理", "file"],
-  ["training", "培养方案", "chart"],
-  ["importExport", "数据导入导出", "database"]
+  ["training", "培养方案", "chart"]
 ];
 
 const fallbackPolicies = [
@@ -2641,8 +2637,7 @@ function renderAdminView() {
     processConfig: renderProcessConfig,
     approval: renderApprovalManage,
     templateManage: renderTemplateManage,
-    training: renderTrainingManage,
-    importExport: renderImportExport
+    training: renderTrainingManage
   };
   return views[state.adminView]();
 }
@@ -3568,71 +3563,6 @@ function renderTrainingManage() {
   );
 }
 
-function renderImportExport() {
-  const configs = getImportExportConfigs();
-  const preview = state.importPreview;
-  const previewRows = preview?.rows?.slice(0, 5) || [];
-  const selectedConfig = configs.find((item) => item.type === preview?.type);
-  const importResult = state.importResult;
-
-  return `
-    ${pageHead("数据导入导出", "已接入当前系统真实数据，支持 Excel 模板下载、当前数据导出和批量导入。", [
-      ["start-import", "开始校验导入", "upload", "primary-button"]
-    ])}
-    <section class="grid two">
-      <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">真实数据</p><h2>导入与导出类型</h2></div></div>
-        <div class="template-list">
-          ${configs.map((item) => `
-            <article class="list-card">
-              <header><h3>${item.title}</h3>${badge(`${item.count} 条`, "neutral")}</header>
-              <p>${item.description}</p>
-              <div class="toolbar">
-                <button class="secondary-button" type="button" onclick="downloadImportExportTemplate('${item.type}')">${icon("download")}下载模板</button>
-                <button class="ghost-button" type="button" onclick="exportImportExportData('${item.type}')">${icon("database")}导出当前数据</button>
-                <button class="ghost-button" type="button" onclick="pickImportFile('${item.type}')">${icon("upload")}选择 Excel</button>
-              </div>
-            </article>
-          `).join("")}
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">文件上传</p><h2>校验与预览</h2></div></div>
-        <div class="import-drop">
-          ${icon("upload")}
-          <strong>${preview ? `当前文件：${escapeHtml(preview.fileName)}` : "请选择 Excel 文件进行预览"}</strong>
-          <p>${preview ? `导入类型：${escapeHtml(selectedConfig?.title || preview.type)}，共 ${preview.rows.length} 行数据。` : "当前支持 Excel 导入；写入前会先显示前 5 行预览。"}</p>
-          <button class="secondary-button" type="button" ${preview ? `onclick="pickImportFile('${preview.type}')"` : `data-action="start-import"`}>${icon("upload")}选择文件</button>
-          <input id="importFileInput" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onchange="handleImportFileChange(event)" />
-        </div>
-        <div class="result-list" style="margin-top:14px">
-          ${preview ? `
-            <article class="list-card">
-              <header>
-                <h3>预览前 5 行</h3>
-                ${badge(`${preview.rows.length} 行`, "neutral")}
-              </header>
-              <div class="table-wrap" style="margin-top: 10px;">
-                <table>
-                  <thead><tr>${preview.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-                  <tbody>
-                    ${previewRows.map((row) => `<tr>${preview.headers.map((_, index) => `<td>${escapeHtml(row[index] || "")}</td>`).join("")}</tr>`).join("")}
-                  </tbody>
-                </table>
-              </div>
-              <div class="toolbar" style="margin-top: 12px;">
-                <button class="primary-button" type="button" onclick="confirmImportData()" ${state.isImporting ? "disabled" : ""}>${icon("check")}${state.isImporting ? "导入中..." : "确认导入真实数据"}</button>
-              </div>
-            </article>
-          ` : reminder("未选择导入文件", "请选择左侧任一类型的 Excel 文件后，系统会在这里展示预览内容。", "warning")}
-          ${importResult ? reminder(`导入完成：成功 ${importResult.imported} 行`, `新增 ${importResult.created} 行，更新 ${importResult.updated} 行，失败 ${importResult.failed} 行。`, importResult.failed ? "warning" : "success") : reminder("导入审计", "导入成功后会立即刷新当前系统真实数据，并返回新增、更新、失败条数。", "success")}
-          ${importResult?.errors?.length ? `<article class="list-card is-unread"><header><h3>失败明细</h3>${badge(`${importResult.errors.length} 条`, "danger")}</header><p>${escapeHtml(importResult.errors.join("；"))}</p></article>` : ""}
-        </div>
-      </div>
-    </section>
-  `;
-}
-
 function adminPageWithTable(title, subtitle, actions, headers, rows, side) {
   return `
     ${pageHead(title, subtitle, [
@@ -4055,7 +3985,7 @@ async function bootstrapSession() {
 
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
     await fetchBasicData({ silent: true });
-    if (state.role !== "student" && state.role !== "student_leader" && ["importExport", "processConfig"].includes(state.adminView)) {
+    if (state.role !== "student" && state.role !== "student_leader" && state.adminView === "processConfig") {
       await fetchAdminProcessNodes({ silent: true });
       await fetchProcessReviews({ silent: true });
     }
@@ -4271,172 +4201,6 @@ function triggerBlobDownload(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
 
-function getImportExportConfigs() {
-  return [
-    {
-      type: "users",
-      title: "学生基础信息",
-      description: "导出和导入用户账号、角色、专业、年级等真实 Excel 数据。",
-      count: state.userRecords.length
-    },
-    {
-      type: "process_nodes",
-      title: "党员流程节点",
-      description: "导出和导入党团流程节点顺序、名称与提醒规则 Excel 数据。",
-      count: state.processNodes.length
-    },
-    {
-      type: "notices",
-      title: "通知公告",
-      description: "导出和导入通知标题、内容、目标人群与状态 Excel 数据。",
-      count: state.notices.length
-    },
-    {
-      type: "plans",
-      title: "培养方案",
-      description: "导出和导入培养方案名称、适用年级、专业方向与状态 Excel 数据。",
-      count: state.planRecords.length
-    }
-  ];
-}
-
-function parseWorkbookPreview(arrayBuffer) {
-  if (!window.XLSX) {
-    throw new Error("Excel 解析库尚未加载完成");
-  }
-
-  const workbook = window.XLSX.read(arrayBuffer, { type: "array" });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
-    throw new Error("Excel 文件中没有工作表");
-  }
-
-  const worksheet = workbook.Sheets[sheetName];
-  const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-  if (rows.length < 2) {
-    throw new Error("Excel 文件至少需要表头和一行数据");
-  }
-
-  return {
-    headers: rows[0].map((item) => String(item || "").trim()),
-    rows: rows.slice(1).map((row) => row.map((item) => String(item ?? "").trim()))
-  };
-}
-
-async function downloadImportExportFile(type, mode) {
-  const actionPath = mode === "template" ? "templates" : "data";
-  const response = await fetch(`${API_BASE_URL}/basic/import-export/${actionPath}/${encodeURIComponent(type)}`, {
-    headers: apiHeaders()
-  });
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "下载失败");
-  }
-  const blob = await response.blob();
-  const fileName = parseDownloadFileName(response.headers.get("content-disposition")) || `${type}.xlsx`;
-  triggerBlobDownload(blob, fileName);
-}
-
-window.downloadImportExportTemplate = async function(type) {
-  try {
-    await downloadImportExportFile(type, "template");
-    showToast("模板下载成功");
-  } catch (error) {
-    showToast(`模板下载失败: ${error.message}`);
-  }
-};
-
-window.exportImportExportData = async function(type) {
-  try {
-    await downloadImportExportFile(type, "data");
-    showToast("当前数据导出成功");
-  } catch (error) {
-    showToast(`数据导出失败: ${error.message}`);
-  }
-};
-
-window.pickImportFile = function(type) {
-  const input = document.getElementById("importFileInput");
-  if (!input) {
-    showToast("导入控件尚未加载完成");
-    return;
-  }
-  input.dataset.type = type;
-  input.click();
-};
-
-window.handleImportFileChange = async function(event) {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  if (!file) return;
-
-  const type = event.target.dataset.type || "";
-  if (!type) {
-    showToast("请先选择导入类型");
-    return;
-  }
-  const lowerFileName = String(file.name).toLowerCase();
-  if (!lowerFileName.endsWith(".xlsx") && !lowerFileName.endsWith(".xls")) {
-    showToast("当前请导入 Excel 文件（.xlsx 或 .xls）");
-    return;
-  }
-
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const preview = parseWorkbookPreview(arrayBuffer);
-    const fileData = await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(file);
-    });
-    state.importPreview = {
-      type,
-      fileName: file.name,
-      headers: preview.headers,
-      rows: preview.rows,
-      fileData
-    };
-    state.importResult = null;
-    render();
-    showToast("文件已读取，请确认预览后执行导入");
-  } catch (error) {
-    showToast(`文件解析失败: ${error.message}`);
-  }
-};
-
-window.confirmImportData = async function() {
-  if (!state.importPreview?.type || !state.importPreview?.fileData) {
-    showToast("请先选择要导入的 Excel 文件");
-    return;
-  }
-
-  state.isImporting = true;
-  render();
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/basic/import-export/import/${encodeURIComponent(state.importPreview.type)}`, {
-      method: "POST",
-      headers: apiHeaders(true),
-      body: JSON.stringify({
-        fileName: state.importPreview.fileName,
-        fileData: state.importPreview.fileData
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "导入失败");
-    state.importResult = data;
-    await fetchBasicData({ silent: true });
-    await fetchAdminProcessNodes({ silent: true });
-    await fetchProcessReviews({ silent: true });
-    showToast("数据导入完成");
-  } catch (error) {
-    showToast(`导入失败: ${error.message}`);
-  } finally {
-    state.isImporting = false;
-    render();
-  }
-};
-
 function showToast(message) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -4518,7 +4282,7 @@ document.addEventListener("click", async (event) => {
         await fetchProcessReviews({ silent: true });
       } else if (state.adminView === "templateManage") {
         await fetchTemplates();
-      } else if (["importExport", "processConfig"].includes(state.adminView)) {
+      } else if (state.adminView === "processConfig") {
         await fetchBasicData({ silent: true });
         await fetchAdminProcessNodes({ silent: true });
         await fetchProcessReviews({ silent: true });
@@ -4649,7 +4413,6 @@ document.addEventListener("click", async (event) => {
     "add-node": "已切换到新增节点表单。",
     "approval-return": "申请已模拟退回补充。",
     "approval-pass": "申请已模拟通过，电子证明将进入生成队列。",
-    "start-import": "请选择一个导入类型后再上传 Excel 文件。",
     "table-action": "已打开该记录的操作入口。"
   };
 
@@ -4669,15 +4432,6 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "close-modal") {
     closeModal();
-    return;
-  }
-  if (action === "start-import") {
-    const configs = getImportExportConfigs();
-    if (!configs.length) {
-      showToast("暂无可导入的数据类型");
-      return;
-    }
-    pickImportFile(configs[0].type);
     return;
   }
   if (action === "submit-material") {
