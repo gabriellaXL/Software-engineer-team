@@ -219,3 +219,42 @@ exports.updateProfile = async (req, res) => {
     client?.release();
   }
 };
+
+exports.changePassword = async (req, res) => {
+  const { userId } = req.user;
+  const currentPassword = normalizeValue(req.body.currentPassword);
+  const newPassword = normalizeValue(req.body.newPassword);
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: '当前密码和新密码不能为空' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: '新密码长度不能少于 6 位' });
+  }
+  if (currentPassword === newPassword) {
+    return res.status(400).json({ error: '新密码不能与当前密码相同' });
+  }
+
+  try {
+    const { rows } = await db.query(
+      'SELECT password FROM tb_user WHERE user_id = $1',
+      [userId]
+    );
+    const user = rows[0];
+    if (!user) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+    if (String(user.password || '') !== currentPassword) {
+      return res.status(400).json({ error: '当前密码错误' });
+    }
+
+    await db.query(
+      'UPDATE tb_user SET password = $1 WHERE user_id = $2',
+      [newPassword, userId]
+    );
+
+    res.json({ message: '密码修改成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

@@ -2109,6 +2109,32 @@ function renderStudentProfile() {
         </div>
       </form>
     </section>
+    <section class="panel" style="margin-top:14px;">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">账户安全</p>
+          <h2>修改密码</h2>
+          <p>修改成功后需要使用新密码重新登录，旧密码将立即失效。</p>
+        </div>
+      </div>
+      <form class="form-grid" data-form="change-password" onsubmit="handleChangePassword(event)">
+        <label class="field full">
+          <span>当前密码</span>
+          <input type="password" name="currentPassword" required minlength="6" />
+        </label>
+        <label class="field full">
+          <span>新密码</span>
+          <input type="password" name="newPassword" required minlength="6" />
+        </label>
+        <label class="field full">
+          <span>确认新密码</span>
+          <input type="password" name="confirmPassword" required minlength="6" />
+        </label>
+        <div class="toolbar field full">
+          <button type="submit" class="primary-button">${icon("lock")}修改密码</button>
+        </div>
+      </form>
+    </section>
   `;
 }
 
@@ -2145,6 +2171,32 @@ function renderAdminProfile() {
         </div>
       </form>
     </section>
+    <section class="panel" style="margin-top:14px;">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">账户安全</p>
+          <h2>修改密码</h2>
+          <p>修改成功后需要使用新密码重新登录，旧密码将立即失效。</p>
+        </div>
+      </div>
+      <form class="form-grid" data-form="change-password" onsubmit="handleChangePassword(event)">
+        <label class="field full">
+          <span>当前密码</span>
+          <input type="password" name="currentPassword" required minlength="6" />
+        </label>
+        <label class="field full">
+          <span>新密码</span>
+          <input type="password" name="newPassword" required minlength="6" />
+        </label>
+        <label class="field full">
+          <span>确认新密码</span>
+          <input type="password" name="confirmPassword" required minlength="6" />
+        </label>
+        <div class="toolbar field full">
+          <button type="submit" class="primary-button">${icon("lock")}修改密码</button>
+        </div>
+      </form>
+    </section>
   `;
 }
 
@@ -2174,6 +2226,59 @@ window.handleUpdateProfile = async function(event) {
     render();
   } catch(e) {
     showToast("更新失败: " + e.message);
+  }
+};
+
+window.handleChangePassword = async function(event) {
+  event.preventDefault();
+  const form = event.target;
+  const formData = new FormData(form);
+  const currentPassword = formData.get("currentPassword")?.toString() || "";
+  const newPassword = formData.get("newPassword")?.toString() || "";
+  const confirmPassword = formData.get("confirmPassword")?.toString() || "";
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    showToast("请完整填写当前密码、新密码和确认新密码。");
+    return;
+  }
+  if (newPassword.length < 6) {
+    showToast("新密码长度不能少于 6 位。");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    showToast("两次输入的新密码不一致。");
+    return;
+  }
+  if (currentPassword === newPassword) {
+    showToast("新密码不能与当前密码相同。");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/change-password`, {
+      method: 'POST',
+      headers: apiHeaders(true),
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "密码修改失败");
+
+    state.isAuthenticated = false;
+    state.token = null;
+    state.user = null;
+    state.userProfile = null;
+    state.mobileMenuOpen = false;
+    state.editingPolicyId = null;
+    state.editingUserId = null;
+    state.editingPlanId = null;
+    state.studentView = "login";
+    state.studentAppView = "list";
+    state.adminView = "dashboard";
+    clearSessionState();
+    render();
+    showToast("密码修改成功，请使用新密码重新登录。");
+  } catch (error) {
+    showToast("密码修改失败: " + error.message);
   }
 };
 
