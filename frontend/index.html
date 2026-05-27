@@ -6,6 +6,7 @@
     <title>学院学生综合服务与党团管理平台</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- 引入 docxtemplater 和 pizzip 用于读取和填充 Word 模板 -->
     <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.37.11/docxtemplater.js"></script>
@@ -26,10 +27,6 @@
           </div>
         </div>
         <div class="top-actions">
-          <div class="role-switch" role="tablist" aria-label="端切换">
-            <button type="button" class="is-active" data-role="student" role="tab" aria-selected="true">学生端</button>
-            <button type="button" data-role="admin" role="tab" aria-selected="false">管理员端</button>
-          </div>
           <button type="button" class="ghost-button" data-action="quick-search" aria-label="快速检索">
             <span data-icon="search"></span>
             快速检索

@@ -44,20 +44,33 @@ const state = {
   analysisResult: null,
   isAnalysisLoading: false,
   analysisError: "",
+  applications: [],
   notices: [],
+  noticeError: "",
   users: [],
   userRecords: [],
   planRows: [],
   planRecords: [],
   basicError: "",
   noticeFilter: "全部",
+  noticeDraftTags: ["就业", "党团"],
+  noticeAudienceGrades: ["大一", "大二", "大三", "大四"],
+  noticeDraftAttachment: null,
   selectedApproval: "APP-202605-001",
   adminApprovalView: "list",
   approvalFilter: "全部",
   mobileMenuOpen: false,
   editingUserId: null,
-  editingPlanId: null
+  editingPlanId: null,
+  importPreview: null,
+  importResult: null,
+  isImporting: false
 };
+
+const DEFAULT_NOTICE_TAGS = ["就业", "党团", "后勤", "毕业生", "奖助", "安全", "活动"];
+const STUDENT_NOTICE_FILTER_TAGS = ["全部", ...DEFAULT_NOTICE_TAGS, "其它"];
+const NOTICE_DRAFT_STORAGE_KEY = "sds_notice_drafts";
+const GRADE_OPTIONS = ["大一", "大二", "大三", "大四"];
 
 const params = new URLSearchParams(window.location.search);
 if (params.get("role") === "admin") {
@@ -139,10 +152,10 @@ const processNodes = [
 ];
 
 const notices = [
-  { id: "N-001", title: "就业办：春招信息汇总", target: "毕业生、就业标签", time: "2026-05-16 09:00", unread: true, type: "就业", text: "新增 14 条岗位信息，含校友企业内推与学院专场宣讲。" },
-  { id: "N-002", title: "党建办：思想汇报提交提醒", target: "入党积极分子", time: "2026-05-15 17:30", unread: true, type: "党团", text: "培养考察节点将在 2026-05-18 到期，请及时上传附件。" },
-  { id: "N-003", title: "保卫处：校园安全提醒", target: "全体学生", time: "2026-05-14 10:00", unread: false, type: "生活", text: "请留意宿舍门禁、实验室用电和个人物品安全。" },
-  { id: "N-004", title: "后勤：宿舍维修通知", target: "宿舍维修标签", time: "2026-05-12 15:20", unread: false, type: "生活", text: "宿舍集中维修时间为周三下午，请提前整理报修内容。" }
+  { id: "N-001", title: "就业办：春招信息汇总", target: "毕业生、就业标签", time: "2026-05-16 09:00", unread: true, type: "就业", text: "新增 14 条岗位信息，含校友企业内推与学院专场宣讲。详细岗位信息请查看学院就业群公告。", summary: "新增 14 条岗位信息，含校友企业内推与学院专场宣讲。", tags: ["就业", "毕业生"], attachmentName: "", attachmentData: "" },
+  { id: "N-002", title: "党建办：思想汇报提交提醒", target: "入党积极分子", time: "2026-05-15 17:30", unread: true, type: "党团", text: "培养考察节点将在 2026-05-18 到期，请及时上传附件，并按要求填写思想汇报。", summary: "培养考察节点将在 2026-05-18 到期，请及时上传附件。", tags: ["党团", "思想汇报"], attachmentName: "", attachmentData: "" },
+  { id: "N-003", title: "保卫处：校园安全提醒", target: "全体学生", time: "2026-05-14 10:00", unread: false, type: "生活", text: "请留意宿舍门禁、实验室用电和个人物品安全，发现异常及时联系值班老师。", summary: "请留意宿舍门禁、实验室用电和个人物品安全。", tags: ["安全", "生活"], attachmentName: "", attachmentData: "" },
+  { id: "N-004", title: "后勤：宿舍维修通知", target: "宿舍维修标签", time: "2026-05-12 15:20", unread: false, type: "生活", text: "宿舍集中维修时间为周三下午，请提前整理报修内容，并保持联系电话畅通。", summary: "宿舍集中维修时间为周三下午，请提前整理报修内容。", tags: ["后勤", "宿舍维修"], attachmentName: "", attachmentData: "" }
 ];
 
 const applications = [
@@ -436,6 +449,7 @@ async function uploadTranscriptFile(file) {
 async function fetchBasicData(options = {}) {
   if (!state.token) {
     state.notices = [];
+    state.noticeError = "";
     state.users = [];
     state.userRecords = [];
     state.planRows = [];
@@ -443,34 +457,72 @@ async function fetchBasicData(options = {}) {
     return;
   }
 
+  const errors = [];
+
   try {
-    const requests = [
-      fetch(`${API_BASE_URL}/basic/notices`, { headers: apiHeaders() }),
-      fetch(`${API_BASE_URL}/basic/plans`, { headers: apiHeaders() })
-    ];
-    if (state.role !== "student" && state.role !== "student_leader") {
-      requests.push(fetch(`${API_BASE_URL}/basic/users`, { headers: apiHeaders() }));
-    }
-
-    const responses = await Promise.all(requests);
-    const payloads = await Promise.all(responses.map((response) => response.json()));
-    responses.forEach((response, index) => {
-      if (!response.ok) throw new Error(payloads[index].error || "基础管理数据获取失败");
-    });
-
-    state.notices = Array.isArray(payloads[0]) ? payloads[0] : [];
-    state.planRecords = Array.isArray(payloads[1]) ? payloads[1] : [];
-    state.planRows = Array.isArray(payloads[1])
-      ? payloads[1].map((item) => item.row || [item.name, item.grade, item.statusName || item.status, item.updatedAt])
-      : [];
-    state.userRecords = Array.isArray(payloads[2]) ? payloads[2] : [];
-    state.users = Array.isArray(payloads[2])
-      ? payloads[2].map((item) => item.row || [item.accountId || item.account_id, item.name, item.roleName || item.role, item.organization, item.statusText || item.status])
-      : [];
-    state.basicError = "";
+    const noticeResponse = await fetch(`${API_BASE_URL}/basic/notices`, { headers: apiHeaders() });
+    const noticePayload = await noticeResponse.json();
+    if (!noticeResponse.ok) throw new Error(noticePayload.error || "通知数据获取失败");
+    state.notices = Array.isArray(noticePayload) ? noticePayload : [];
+    state.noticeError = "";
   } catch (error) {
-    state.basicError = error.message;
-    if (!options.silent) showToast(`基础管理接口异常：${error.message}`);
+    state.notices = [];
+    state.noticeError = error.message;
+    errors.push(`通知：${error.message}`);
+  }
+
+  try {
+    const planResponse = await fetch(`${API_BASE_URL}/basic/plans`, { headers: apiHeaders() });
+    const planPayload = await planResponse.json();
+    if (!planResponse.ok) throw new Error(planPayload.error || "培养方案获取失败");
+    state.planRecords = Array.isArray(planPayload) ? planPayload : [];
+    state.planRows = Array.isArray(planPayload)
+      ? planPayload.map((item) => item.row || [item.name, item.grade, item.statusName || item.status, item.updatedAt])
+      : [];
+  } catch (error) {
+    state.planRecords = [];
+    state.planRows = [];
+    errors.push(`培养方案：${error.message}`);
+  }
+
+  if (state.role !== "student" && state.role !== "student_leader") {
+    try {
+      const userResponse = await fetch(`${API_BASE_URL}/basic/users`, { headers: apiHeaders() });
+      const userPayload = await userResponse.json();
+      if (!userResponse.ok) throw new Error(userPayload.error || "用户数据获取失败");
+      state.userRecords = Array.isArray(userPayload) ? userPayload : [];
+      state.users = Array.isArray(userPayload)
+        ? userPayload.map((item) => item.row || [item.accountId || item.account_id, item.name, item.roleName || item.role, item.organization, item.statusText || item.status])
+        : [];
+    } catch (error) {
+      state.userRecords = [];
+      state.users = [];
+      errors.push(`用户：${error.message}`);
+    }
+  }
+
+  state.basicError = errors.join("；");
+  if (errors.length && !options.silent) {
+    showToast(`基础管理接口异常：${state.basicError}`);
+  }
+}
+
+async function fetchAdminProcessNodes(options = {}) {
+  if (!state.token || state.role === "student" || state.role === "student_leader") {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/process/nodes?processType=party`, {
+      headers: apiHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "流程节点获取失败");
+    state.processNodes = Array.isArray(data) ? data : [];
+    return state.processNodes;
+  } catch (error) {
+    if (!options.silent) showToast(`流程节点接口异常：${error.message}`);
+    return state.processNodes || [];
   }
 }
 
@@ -597,6 +649,7 @@ async function login(accountId, password, role) {
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
     if (state.role === "student" || state.role === "student_leader") {
       await fetchProcessData({ silent: true });
+      await fetchApplications();
     }
     await fetchBasicData({ silent: true });
 
@@ -1370,8 +1423,9 @@ function renderStudentView() {
 }
 
 function renderStudentHome() {
-  const noticeRows = state.notices.length ? state.notices : notices;
+  const noticeRows = getNoticeRows();
   const userName = getCurrentUserName();
+  const applicationCount = Array.isArray(state.applications) ? state.applications.length : 0;
   return `
     ${pageHead(`上午好，${escapeHtml(userName)}`, "待办 2 项 · 未读通知 2 条 · 当前党团阶段：入党积极分子培养", [
       ["quick-search", "检索政策", "search", "ghost-button"],
@@ -1381,7 +1435,7 @@ function renderStudentHome() {
       ${metric("待办提醒", "2", "思想汇报、证明材料", "amber")}
       ${metric("未读通知", "2", "按就业、党团标签推送", "brand")}
       ${metric("流程进度", "3/4", "培养考察进行中", "green")}
-      ${metric("证明记录", "6", "近一年审批留痕", "teal")}
+      ${metric("证明记录", String(applicationCount), "近一年审批留痕", "teal")}
     </section>
     <section class="grid four" style="margin-top:14px">
       ${actionCard("consult", "智能咨询", "政策问答与模板定位", "message", "brand")}
@@ -1443,7 +1497,10 @@ function renderStudentHome() {
           <button class="ghost-button" type="button" data-nav="student" data-view="notices">${icon("bell")}全部通知</button>
         </div>
         <div class="notice-list">
-          ${noticeRows.slice(0, 3).map(renderNoticeCard).join("")}
+          ${noticeRows.length
+            ? noticeRows.slice(0, 3).map(renderNoticeCard).join("")
+            : `<article class="list-card"><h3>暂无通知</h3><p>${escapeHtml(state.noticeError ? `通知接口异常：${state.noticeError}` : "当前没有可显示的通知记录。")}</p></article>`
+          }
         </div>
       </div>
     </section>
@@ -1575,22 +1632,32 @@ function renderProcess() {
 }
 
 function renderNotices() {
-  const types = ["全部", "就业", "党团", "生活"];
-  const noticeRows = state.notices.length ? state.notices : notices;
-  const rows = state.noticeFilter === "全部" ? noticeRows : noticeRows.filter((item) => item.type === state.noticeFilter);
+  const noticeRows = getNoticeRows();
+  const rows = state.noticeFilter === "全部"
+    ? noticeRows
+    : state.noticeFilter === "其它"
+      ? noticeRows.filter(hasOtherNoticeTag)
+      : noticeRows.filter((item) => (item.tags || []).includes(state.noticeFilter) || item.type === state.noticeFilter);
   return `
-    ${pageHead("通知公告", "根据学生画像和标签精准推送，支持未读筛选与节点提醒。", [
+    ${pageHead("通知公告", "列表仅显示简介，点击可查看完整内容并下载附件。", [
       ["mark-all-read", "全部已读", "check", "ghost-button"]
     ])}
     <section class="panel">
       <div class="chip-row">
-        ${types.map((item) => `<button type="button" class="chip ${state.noticeFilter === item ? "is-active" : ""}" data-notice-filter="${item}">${item}</button>`).join("")}
+        ${STUDENT_NOTICE_FILTER_TAGS.map((item) => `<button type="button" class="chip ${state.noticeFilter === item ? "is-active" : ""}" data-notice-filter="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}
       </div>
     </section>
     <section class="notice-list" style="margin-top:14px">
-      ${rows.map(renderNoticeCard).join("")}
+      ${rows.length
+        ? rows.map((item) => renderNoticeCard(item, { summaryOnly: true, showDetailButton: true })).join("")
+        : `<article class="list-card"><h3>暂无通知</h3><p>${escapeHtml(state.noticeError ? `通知接口异常：${state.noticeError}` : "管理员尚未发布通知。")}</p></article>`
+      }
     </section>
   `;
+}
+
+function getNoticeRows() {
+  return Array.isArray(state.notices) ? state.notices : [];
 }
 
 function renderApplications() {
@@ -1654,6 +1721,12 @@ function renderStudentProfile() {
         <label class="field full">
           <span>班级</span>
           <input type="text" name="class_name" value="${p.class_name || ''}" placeholder="例如：计科 1 班" />
+        </label>
+        <label class="field full">
+          <span>年级</span>
+          <select name="grade" required>
+            ${GRADE_OPTIONS.map((item) => `<option value="${item}" ${p.grade === item ? "selected" : ""}>${item}</option>`).join("")}
+          </select>
         </label>
         <label class="field full">
           <span>电话号码</span>
@@ -1725,8 +1798,10 @@ window.handleUpdateProfile = async function(event) {
     });
     const data = await res.json().catch(() => ({}));
     if(!res.ok) throw new Error(data.error || "个人信息更新失败");
+    if (data && typeof data === "object") {
+      state.userProfile = data;
+    }
     showToast("个人信息更新成功！");
-    await fetchProfile();
     if (state.role === "student" || state.role === "student_leader") {
       state.studentAppView = 'list';
     } else {
@@ -1923,7 +1998,7 @@ function renderAdminView() {
 
 function renderAdminDashboard() {
   const pendingApprovals = (state.applications || []).filter(app => app.status === "待审核");
-  const noticeRows = state.notices.length ? state.notices : notices;
+  const noticeRows = getNoticeRows();
   return `
     ${pageHead("后台首页", "面向老师与管理人员的维护、审核、配置和批量数据处理工作台。", [
       ["new-notice", "新建通知", "plus", "primary-button"]
@@ -1962,7 +2037,10 @@ function renderAdminDashboard() {
             </div>
           </div>
           <div class="notice-list">
-            ${noticeRows.slice(0, 2).map(renderNoticeCard).join("")}
+            ${noticeRows.length
+              ? noticeRows.slice(0, 2).map(renderNoticeCard).join("")
+              : `<article class="list-card"><h3>暂无通知</h3><p>${escapeHtml(state.noticeError ? `通知接口异常：${state.noticeError}` : "当前通知表为空，可在通知管理中发布。")}</p></article>`
+            }
           </div>
         </div>
         <div class="panel">
@@ -2113,8 +2191,9 @@ function renderKnowledgeManage() {
 }
 
 function renderNoticeManage() {
+  const availableTags = getAvailableNoticeTags();
   return `
-    ${pageHead("通知管理", "发布通知并基于学生标签、专业、年级进行精准推送。", [
+    ${pageHead("通知管理", "发布通知时可选择已有标签、自定义标签、填写简介并上传附件。", [
       ["preview-notice", "预览通知", "file", "ghost-button"],
       ["publish-notice", "保存并发布", "bell", "primary-button"]
     ])}
@@ -2123,19 +2202,65 @@ function renderNoticeManage() {
         <div class="panel-head"><div><p class="eyebrow">通知录入</p><h2>发布内容</h2></div></div>
         <form class="form-grid" data-form="notice">
           ${field("通知标题", "input", "请输入通知标题", true)}
+          ${field("通知简介", "textarea", "学生端列表只展示简介，建议控制在一两句话内。", true)}
           ${field("通知内容", "textarea", "支持录入通知正文、截止时间、链接和注意事项。", true)}
-          <label class="field full"><span>标签设置</span><div class="chip-row"><button type="button" class="chip is-active">就业</button><button type="button" class="chip is-active">党团</button><button type="button" class="chip">后勤</button><button type="button" class="chip">毕业生</button></div></label>
+          <label class="field full">
+            <span>标签设置</span>
+            <div class="chip-row">
+              ${availableTags.map((tag) => `
+                <button
+                  type="button"
+                  class="chip ${state.noticeDraftTags.includes(tag) ? "is-active" : ""}"
+                  data-action="toggle-notice-tag"
+                  data-tag="${escapeHtml(tag)}"
+                >${escapeHtml(tag)}</button>
+              `).join("")}
+            </div>
+          </label>
+          <label class="field full">
+            <span>自定义标签</span>
+            <input name="customTags" type="text" placeholder="可输入多个标签，用逗号分隔，如：科研,竞赛,实习" />
+          </label>
+          <label class="field full">
+            <span>推送年级</span>
+            <div class="chip-row">
+              ${GRADE_OPTIONS.map((grade) => `
+                <button
+                  type="button"
+                  class="chip ${state.noticeAudienceGrades.includes(grade) ? "is-active" : ""}"
+                  data-action="toggle-notice-audience-grade"
+                  data-grade="${escapeHtml(grade)}"
+                >${escapeHtml(grade)}</button>
+              `).join("")}
+            </div>
+            <small style="color:#64748b;">只有选中年级的学生可以看到这条推送。默认四个年级都可见。</small>
+          </label>
+          <label class="field full">
+            <span>附件上传</span>
+            <input name="attachment" type="file" />
+            <small id="noticeAttachmentHint" style="color:#64748b;">${escapeHtml(state.noticeDraftAttachment?.name ? `当前已缓存附件：${state.noticeDraftAttachment.name}` : "支持上传通知附件，学生端详情页可直接下载。")}</small>
+          </label>
+          <input type="hidden" name="selectedTags" value="${escapeHtml(JSON.stringify(state.noticeDraftTags))}" />
+          <input type="hidden" name="audienceGrades" value="${escapeHtml(JSON.stringify(state.noticeAudienceGrades))}" />
           <div class="toolbar field full"><button class="primary-button" type="submit">${icon("bell")}确认发布</button></div>
         </form>
       </div>
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">推送对象</p><h2>触达预估</h2></div></div>
+        <div class="panel-head"><div><p class="eyebrow">草稿箱</p><h2>未发布通知</h2></div></div>
         <div class="result-list">
-          ${reminder("目标年级：2023 级本科生", "预计触达 286 人，其中 214 人已绑定账号。", "success")}
-          ${reminder("筛选条件", "计算机 / 数据科学，且包含就业或党团标签。", "warning")}
+          <article class="list-card">
+            <header>
+              <h3>推送范围</h3>
+              ${badge("提醒", "warning")}
+            </header>
+            <p id="noticeTagSummaryText">${escapeHtml(getNoticeTagSummaryText())}</p>
+            <p id="noticeAudienceSummaryText" style="margin-top:6px;color:#64748b;">${escapeHtml(getNoticeAudienceSummaryText())}</p>
+          </article>
+          ${reminder("附件与简介", "学生端列表只显示简介；点击详情后可查看正文并下载附件。", "success")}
+          <div id="noticeDraftList">${renderNoticeDraftList()}</div>
         </div>
         <div class="toolbar" style="margin-top:14px">
-          <button class="ghost-button" data-action="save-draft">${icon("file")}存为草稿</button>
+          <button class="ghost-button" data-action="notice-save-draft">${icon("file")}存为草稿</button>
           <button class="primary-button" data-action="publish-notice">${icon("check")}确认发布</button>
         </div>
       </div>
@@ -2529,18 +2654,29 @@ function renderTrainingManage() {
 }
 
 function renderImportExport() {
+  const configs = getImportExportConfigs();
+  const preview = state.importPreview;
+  const previewRows = preview?.rows?.slice(0, 5) || [];
+  const selectedConfig = configs.find((item) => item.type === preview?.type);
+  const importResult = state.importResult;
+
   return `
-    ${pageHead("数据导入导出", "外部系统暂不直连，业务数据通过 Excel / Word / PDF 批量导入导出。", [
+    ${pageHead("数据导入导出", "已接入当前系统真实数据，支持 Excel 模板下载、当前数据导出和批量导入。", [
       ["start-import", "开始校验导入", "upload", "primary-button"]
     ])}
     <section class="grid two">
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">模板下载</p><h2>导入类型</h2></div></div>
+        <div class="panel-head"><div><p class="eyebrow">真实数据</p><h2>导入与导出类型</h2></div></div>
         <div class="template-list">
-          ${["学生基础信息模板", "党员流程模板", "通知标签模板", "培养方案模板"].map((item) => `
+          ${configs.map((item) => `
             <article class="list-card">
-              <header><h3>${item}</h3>${badge("Excel", "neutral")}</header>
-              <div class="toolbar"><button class="secondary-button" data-action="download-template">${icon("download")}下载模板</button></div>
+              <header><h3>${item.title}</h3>${badge(`${item.count} 条`, "neutral")}</header>
+              <p>${item.description}</p>
+              <div class="toolbar">
+                <button class="secondary-button" type="button" onclick="downloadImportExportTemplate('${item.type}')">${icon("download")}下载模板</button>
+                <button class="ghost-button" type="button" onclick="exportImportExportData('${item.type}')">${icon("database")}导出当前数据</button>
+                <button class="ghost-button" type="button" onclick="pickImportFile('${item.type}')">${icon("upload")}选择 Excel</button>
+              </div>
             </article>
           `).join("")}
         </div>
@@ -2549,13 +2685,33 @@ function renderImportExport() {
         <div class="panel-head"><div><p class="eyebrow">文件上传</p><h2>校验与预览</h2></div></div>
         <div class="import-drop">
           ${icon("upload")}
-          <strong>拖拽文件到此处或点击选择文件</strong>
-          <p>支持 Excel / CSV / PDF，最大 30MB；写入前必须完成预览确认。</p>
-          <button class="secondary-button" data-action="start-import">${icon("upload")}选择文件</button>
+          <strong>${preview ? `当前文件：${escapeHtml(preview.fileName)}` : "请选择 Excel 文件进行预览"}</strong>
+          <p>${preview ? `导入类型：${escapeHtml(selectedConfig?.title || preview.type)}，共 ${preview.rows.length} 行数据。` : "当前支持 Excel 导入；写入前会先显示前 5 行预览。"}</p>
+          <button class="secondary-button" type="button" ${preview ? `onclick="pickImportFile('${preview.type}')"` : `data-action="start-import"`}>${icon("upload")}选择文件</button>
+          <input id="importFileInput" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onchange="handleImportFileChange(event)" />
         </div>
         <div class="result-list" style="margin-top:14px">
-          ${reminder("学生信息_2026.xlsx 校验完成", "发现 3 条错误：第 12 行缺少学号，第 28 行专业字段不在枚举范围内。", "warning")}
-          ${reminder("导入审计", "确认写入后将同步记录管理员、时间、来源文件与影响行数。", "success")}
+          ${preview ? `
+            <article class="list-card">
+              <header>
+                <h3>预览前 5 行</h3>
+                ${badge(`${preview.rows.length} 行`, "neutral")}
+              </header>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table>
+                  <thead><tr>${preview.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+                  <tbody>
+                    ${previewRows.map((row) => `<tr>${preview.headers.map((_, index) => `<td>${escapeHtml(row[index] || "")}</td>`).join("")}</tr>`).join("")}
+                  </tbody>
+                </table>
+              </div>
+              <div class="toolbar" style="margin-top: 12px;">
+                <button class="primary-button" type="button" onclick="confirmImportData()" ${state.isImporting ? "disabled" : ""}>${icon("check")}${state.isImporting ? "导入中..." : "确认导入真实数据"}</button>
+              </div>
+            </article>
+          ` : reminder("未选择导入文件", "请选择左侧任一类型的 Excel 文件后，系统会在这里展示预览内容。", "warning")}
+          ${importResult ? reminder(`导入完成：成功 ${importResult.imported} 行`, `新增 ${importResult.created} 行，更新 ${importResult.updated} 行，失败 ${importResult.failed} 行。`, importResult.failed ? "warning" : "success") : reminder("导入审计", "导入成功后会立即刷新当前系统真实数据，并返回新增、更新、失败条数。", "success")}
+          ${importResult?.errors?.length ? `<article class="list-card is-unread"><header><h3>失败明细</h3>${badge(`${importResult.errors.length} 条`, "danger")}</header><p>${escapeHtml(importResult.errors.join("；"))}</p></article>` : ""}
         </div>
       </div>
     </section>
@@ -2649,20 +2805,279 @@ function reminder(title, text, type) {
   `;
 }
 
-function renderNoticeCard(item) {
+function renderNoticeCard(item, options = {}) {
+  const summaryOnly = options.summaryOnly !== false;
+  const showDetailButton = options.showDetailButton !== false;
+  const summary = item.summary || item.text || "";
+  const tags = Array.isArray(item.tags) ? item.tags : [];
   return `
     <article class="list-card ${item.unread ? "is-unread" : ""}">
       <header>
-        <h3>${item.title}</h3>
+        <h3>${escapeHtml(item.title)}</h3>
         ${badge(item.unread ? "未读" : "已读", item.unread ? "warning" : "neutral")}
       </header>
-      <p>${item.text}</p>
+      <p>${escapeHtml(summaryOnly ? summary : (item.text || summary))}</p>
+      ${tags.length ? `<div class="chip-row" style="margin-top:12px;">${tags.map((tag) => `<span class="chip is-active">${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
       <div class="list-meta">
-        <span>${item.time}</span>
-        <span>${item.target}</span>
+        <span>${escapeHtml(item.time)}</span>
+        <span>${escapeHtml(item.target || "全体学生")}</span>
+        ${item.attachmentName ? `<span>附件：${escapeHtml(item.attachmentName)}</span>` : ""}
       </div>
+      ${showDetailButton ? `<div class="toolbar" style="margin-top:12px;"><button type="button" class="secondary-button" data-action="view-notice" data-id="${escapeHtml(item.id)}">${icon("file")}查看详情</button></div>` : ""}
     </article>
   `;
+}
+
+function getAvailableNoticeTags(sourceRows) {
+  const rows = Array.isArray(sourceRows) ? sourceRows : getNoticeRows();
+  const merged = new Set(DEFAULT_NOTICE_TAGS);
+  rows.forEach((item) => {
+    (item.tags || []).forEach((tag) => {
+      const normalized = String(tag || "").trim();
+      if (normalized) merged.add(normalized);
+    });
+    const typeTag = String(item.type || "").trim();
+    if (typeTag && typeTag !== "综合") merged.add(typeTag);
+  });
+  return Array.from(merged);
+}
+
+function hasOtherNoticeTag(item) {
+  const tags = Array.isArray(item?.tags) ? item.tags : [];
+  return tags.some((tag) => {
+    const normalized = String(tag || "").trim();
+    return normalized && !DEFAULT_NOTICE_TAGS.includes(normalized);
+  });
+}
+
+function parseCustomTags(value) {
+  return String(value || "")
+    .split(/[，,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getStoredNoticeDrafts() {
+  try {
+    return JSON.parse(localStorage.getItem(NOTICE_DRAFT_STORAGE_KEY) || "[]");
+  } catch (error) {
+    console.error("读取通知草稿失败", error);
+    return [];
+  }
+}
+
+function setStoredNoticeDrafts(drafts) {
+  localStorage.setItem(NOTICE_DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+}
+
+async function buildNoticeDraftFromForm(form) {
+  const formData = new FormData(form);
+  const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
+  let attachment = state.noticeDraftAttachment;
+  if (attachmentFile) {
+    attachment = {
+      name: attachmentFile.name,
+      data: await fileToDataUrl(attachmentFile)
+    };
+  }
+  return {
+    id: `notice-draft-${Date.now()}`,
+    title: formData.get("title")?.toString().trim() || "",
+    summary: formData.get("summary")?.toString().trim() || "",
+    content: formData.get("content")?.toString().trim() || "",
+    customTags: formData.get("customTags")?.toString().trim() || "",
+    selectedTags: [...state.noticeDraftTags],
+    audienceGrades: [...state.noticeAudienceGrades],
+    attachmentName: attachment?.name || "",
+    attachmentData: attachment?.data || "",
+    updatedAt: new Date().toLocaleString()
+  };
+}
+
+function renderNoticeDraftList() {
+  const drafts = getStoredNoticeDrafts();
+  if (!drafts.length) {
+    return `<p style="color:#94a3b8; padding: 16px 0;">草稿箱为空</p>`;
+  }
+  return drafts.map((draft) => `
+    <article class="list-card">
+      <header>
+        <h3>${escapeHtml(draft.title || "未命名草稿")}</h3>
+        ${badge("草稿", "neutral")}
+      </header>
+      <p>${escapeHtml(draft.summary || draft.content || "暂无内容")}</p>
+      <div class="list-meta">
+        <span>${escapeHtml(draft.updatedAt || "")}</span>
+        <span>${escapeHtml((draft.selectedTags || []).join("、") || "未选标签")}</span>
+        <span>${escapeHtml((draft.audienceGrades || []).join("、") || "全体年级")}</span>
+      </div>
+      <div class="toolbar" style="margin-top:12px;">
+        <button type="button" class="secondary-button" data-action="load-notice-draft" data-id="${escapeHtml(draft.id)}">${icon("file")}加载</button>
+        <button type="button" class="ghost-button" data-action="delete-notice-draft" data-id="${escapeHtml(draft.id)}">${icon("x")}删除</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function updateNoticeDraftListUI() {
+  const container = document.getElementById("noticeDraftList");
+  if (container) {
+    container.innerHTML = renderNoticeDraftList();
+  }
+}
+
+function loadNoticeDraft(draftId) {
+  const draft = getStoredNoticeDrafts().find((item) => String(item.id) === String(draftId));
+  if (!draft) {
+    showToast("未找到该通知草稿");
+    return;
+  }
+  const form = document.querySelector('form[data-form="notice"]');
+  if (!form) {
+    showToast("当前未打开通知表单");
+    return;
+  }
+  form.querySelector('[name="title"]').value = draft.title || "";
+  form.querySelector('[name="summary"]').value = draft.summary || "";
+  form.querySelector('[name="content"]').value = draft.content || "";
+  form.querySelector('[name="customTags"]').value = draft.customTags || "";
+  state.noticeDraftTags = Array.isArray(draft.selectedTags) && draft.selectedTags.length ? draft.selectedTags : ["就业", "党团"];
+  state.noticeAudienceGrades = Array.isArray(draft.audienceGrades) && draft.audienceGrades.length ? draft.audienceGrades : [...GRADE_OPTIONS];
+  state.noticeDraftAttachment = draft.attachmentData ? { name: draft.attachmentName || "草稿附件", data: draft.attachmentData } : null;
+  updateNoticeTagSelectionUI();
+  updateNoticeAttachmentHint();
+  showToast("通知草稿已加载");
+}
+
+function deleteNoticeDraft(draftId) {
+  const drafts = getStoredNoticeDrafts().filter((item) => String(item.id) !== String(draftId));
+  setStoredNoticeDrafts(drafts);
+}
+
+function getNoticeTagSummaryText() {
+  return state.noticeDraftTags.length
+    ? `当前已选择标签：${state.noticeDraftTags.join("、")}`
+    : "当前未选标签，发布后会以“综合通知”展示。";
+}
+
+function getNoticeAudienceSummaryText() {
+  return state.noticeAudienceGrades.length === GRADE_OPTIONS.length
+    ? "当前推送年级：大一、大二、大三、大四"
+    : state.noticeAudienceGrades.length
+      ? `当前推送年级：${state.noticeAudienceGrades.join("、")}`
+      : "当前未选推送年级，发布时将默认所有年级可见。";
+}
+
+function updateNoticeTagSelectionUI() {
+  const noticeForm = document.querySelector('form[data-form="notice"]');
+  if (!noticeForm) return;
+
+  noticeForm.querySelectorAll('[data-action="toggle-notice-tag"]').forEach((button) => {
+    const tag = button.dataset.tag;
+    button.classList.toggle("is-active", state.noticeDraftTags.includes(tag));
+  });
+
+  const hiddenInput = noticeForm.querySelector('input[name="selectedTags"]');
+  if (hiddenInput) {
+    hiddenInput.value = JSON.stringify(state.noticeDraftTags);
+  }
+  const audienceInput = noticeForm.querySelector('input[name="audienceGrades"]');
+  if (audienceInput) {
+    audienceInput.value = JSON.stringify(state.noticeAudienceGrades);
+  }
+
+  noticeForm.querySelectorAll('[data-action="toggle-notice-audience-grade"]').forEach((button) => {
+    const grade = button.dataset.grade;
+    button.classList.toggle("is-active", state.noticeAudienceGrades.includes(grade));
+  });
+
+  const summaryText = document.getElementById("noticeTagSummaryText");
+  if (summaryText) {
+    summaryText.textContent = getNoticeTagSummaryText();
+  }
+  const audienceSummaryText = document.getElementById("noticeAudienceSummaryText");
+  if (audienceSummaryText) {
+    audienceSummaryText.textContent = getNoticeAudienceSummaryText();
+  }
+}
+
+function updateNoticeAttachmentHint() {
+  const hint = document.getElementById("noticeAttachmentHint");
+  if (!hint) return;
+  if (state.noticeDraftAttachment?.name) {
+    hint.textContent = `当前已缓存附件：${state.noticeDraftAttachment.name}`;
+  } else {
+    hint.textContent = "支持上传通知附件，学生端详情页可直接下载。";
+  }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("附件读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderNoticeDetailModal(notice) {
+  const tags = Array.isArray(notice.tags) ? notice.tags : [];
+  return `
+    <div class="modal" id="noticeDetailModal" style="display:flex;">
+      <div class="modal-panel" style="width: 560px;">
+        <div class="modal-head">
+          <div><p class="eyebrow">通知详情</p><h2>${escapeHtml(notice.title)}</h2></div>
+          <button type="button" class="icon-button" onclick="document.getElementById('noticeDetailModal').remove()">${icon("x")}</button>
+        </div>
+        <div style="padding-top: 10px;">
+          <p><strong>发布时间：</strong>${escapeHtml(notice.time || "-")}</p>
+          <p><strong>面向对象：</strong>${escapeHtml(notice.target || "全体学生")}</p>
+          <p><strong>简介：</strong>${escapeHtml(notice.summary || notice.text || "无")}</p>
+          ${tags.length ? `<p><strong>标签：</strong>${escapeHtml(tags.join("、"))}</p>` : ""}
+          <p style="margin-top: 12px;"><strong>正文内容：</strong></p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;white-space:pre-wrap;">${escapeHtml(notice.text || "暂无正文")}</div>
+          ${notice.attachmentName ? `
+            <div style="margin-top: 14px;">
+              <strong>通知附件：</strong>
+              ${notice.attachmentData
+                ? `<button class="secondary-button" type="button" onclick="downloadNoticeAttachment('${escapeHtml(notice.id)}')">${icon("download")}下载 ${escapeHtml(notice.attachmentName)}</button>`
+                : `<span style="color:#64748b;">${escapeHtml(notice.attachmentName)}（预览中，发布后可下载）</span>`
+              }
+            </div>
+          ` : ""}
+        </div>
+        <div class="toolbar" style="margin-top: 18px;">
+          <button class="primary-button" type="button" onclick="document.getElementById('noticeDetailModal').remove()">${icon("check")}关闭</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openNoticeDetail(noticeId) {
+  const noticeRows = getNoticeRows();
+  const notice = noticeRows.find((item) => String(item.id) === String(noticeId));
+  if (!notice) {
+    showToast("未找到该通知");
+    return;
+  }
+  document.getElementById("noticeDetailModal")?.remove();
+  document.body.insertAdjacentHTML("beforeend", renderNoticeDetailModal(notice));
+}
+
+window.downloadNoticeAttachment = function(noticeId) {
+  const noticeRows = getNoticeRows();
+  const notice = noticeRows.find((item) => String(item.id) === String(noticeId));
+  if (!notice?.attachmentData) {
+    showToast("该通知暂无附件");
+    return;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = notice.attachmentData;
+  anchor.download = notice.attachmentName || `notice-${noticeId}-attachment`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
 }
 
 async function bootstrapSession() {
@@ -2698,6 +3113,7 @@ async function bootstrapSession() {
       }
       if (state.studentView === "login" || state.studentView === "register") state.studentView = "home";
       await fetchProcessData({ silent: true });
+      await fetchApplications();
       const lastTranscriptId = getSessionItem('sds_last_transcript_id');
       if (lastTranscriptId && state.studentView === "analysis") {
         state.transcriptTask = { transcript_id: lastTranscriptId, upload_time: "" };
@@ -2710,6 +3126,9 @@ async function bootstrapSession() {
 
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
     await fetchBasicData({ silent: true });
+    if (state.role !== "student" && state.role !== "student_leader" && state.adminView === "importExport") {
+      await fetchAdminProcessNodes({ silent: true });
+    }
   } catch (error) {
     state.token = null;
     state.isAuthenticated = false;
@@ -2874,6 +3293,7 @@ function field(label, type, value, full = false) {
 function fieldName(label) {
   const names = {
     "通知标题": "title",
+    "通知简介": "summary",
     "通知内容": "content",
   };
   return names[label] || "";
@@ -2917,6 +3337,171 @@ function triggerBlobDownload(blob, fileName) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
+
+function getImportExportConfigs() {
+  return [
+    {
+      type: "users",
+      title: "学生基础信息",
+      description: "导出和导入用户账号、角色、专业、年级等真实 Excel 数据。",
+      count: state.userRecords.length
+    },
+    {
+      type: "process_nodes",
+      title: "党员流程节点",
+      description: "导出和导入党团流程节点顺序、名称与提醒规则 Excel 数据。",
+      count: state.processNodes.length
+    },
+    {
+      type: "notices",
+      title: "通知公告",
+      description: "导出和导入通知标题、内容、目标人群与状态 Excel 数据。",
+      count: state.notices.length
+    },
+    {
+      type: "plans",
+      title: "培养方案",
+      description: "导出和导入培养方案名称、适用年级、专业方向与状态 Excel 数据。",
+      count: state.planRecords.length
+    }
+  ];
+}
+
+function parseWorkbookPreview(arrayBuffer) {
+  if (!window.XLSX) {
+    throw new Error("Excel 解析库尚未加载完成");
+  }
+
+  const workbook = window.XLSX.read(arrayBuffer, { type: "array" });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) {
+    throw new Error("Excel 文件中没有工作表");
+  }
+
+  const worksheet = workbook.Sheets[sheetName];
+  const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+  if (rows.length < 2) {
+    throw new Error("Excel 文件至少需要表头和一行数据");
+  }
+
+  return {
+    headers: rows[0].map((item) => String(item || "").trim()),
+    rows: rows.slice(1).map((row) => row.map((item) => String(item ?? "").trim()))
+  };
+}
+
+async function downloadImportExportFile(type, mode) {
+  const actionPath = mode === "template" ? "templates" : "data";
+  const response = await fetch(`${API_BASE_URL}/basic/import-export/${actionPath}/${encodeURIComponent(type)}`, {
+    headers: apiHeaders()
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "下载失败");
+  }
+  const blob = await response.blob();
+  const fileName = parseDownloadFileName(response.headers.get("content-disposition")) || `${type}.xlsx`;
+  triggerBlobDownload(blob, fileName);
+}
+
+window.downloadImportExportTemplate = async function(type) {
+  try {
+    await downloadImportExportFile(type, "template");
+    showToast("模板下载成功");
+  } catch (error) {
+    showToast(`模板下载失败: ${error.message}`);
+  }
+};
+
+window.exportImportExportData = async function(type) {
+  try {
+    await downloadImportExportFile(type, "data");
+    showToast("当前数据导出成功");
+  } catch (error) {
+    showToast(`数据导出失败: ${error.message}`);
+  }
+};
+
+window.pickImportFile = function(type) {
+  const input = document.getElementById("importFileInput");
+  if (!input) {
+    showToast("导入控件尚未加载完成");
+    return;
+  }
+  input.dataset.type = type;
+  input.click();
+};
+
+window.handleImportFileChange = async function(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+
+  const type = event.target.dataset.type || "";
+  if (!type) {
+    showToast("请先选择导入类型");
+    return;
+  }
+  const lowerFileName = String(file.name).toLowerCase();
+  if (!lowerFileName.endsWith(".xlsx") && !lowerFileName.endsWith(".xls")) {
+    showToast("当前请导入 Excel 文件（.xlsx 或 .xls）");
+    return;
+  }
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const preview = parseWorkbookPreview(arrayBuffer);
+    const fileData = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(file);
+    });
+    state.importPreview = {
+      type,
+      fileName: file.name,
+      headers: preview.headers,
+      rows: preview.rows,
+      fileData
+    };
+    state.importResult = null;
+    render();
+    showToast("文件已读取，请确认预览后执行导入");
+  } catch (error) {
+    showToast(`文件解析失败: ${error.message}`);
+  }
+};
+
+window.confirmImportData = async function() {
+  if (!state.importPreview?.type || !state.importPreview?.fileData) {
+    showToast("请先选择要导入的 Excel 文件");
+    return;
+  }
+
+  state.isImporting = true;
+  render();
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/basic/import-export/import/${encodeURIComponent(state.importPreview.type)}`, {
+      method: "POST",
+      headers: apiHeaders(true),
+      body: JSON.stringify({
+        fileName: state.importPreview.fileName,
+        fileData: state.importPreview.fileData
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "导入失败");
+    state.importResult = data;
+    await fetchBasicData({ silent: true });
+    await fetchAdminProcessNodes({ silent: true });
+    showToast("数据导入完成");
+  } catch (error) {
+    showToast(`导入失败: ${error.message}`);
+  } finally {
+    state.isImporting = false;
+    render();
+  }
+};
 
 function showToast(message) {
   const toast = document.getElementById("toast");
@@ -2962,7 +3547,7 @@ function renderGlobalSearchResults() {
 
 document.addEventListener("click", async (event) => {
   const roleButton = event.target.closest("[data-role]");
-  if (roleButton) {
+  if (roleButton && !state.isAuthenticated) {
     state.role = roleButton.dataset.role;
     render();
     return;
@@ -2984,6 +3569,7 @@ document.addEventListener("click", async (event) => {
       }
       if (state.studentView === "process" || state.studentView === "home") {
         await fetchProcessData({ silent: true });
+        await fetchApplications();
       }
       if (["home", "notices"].includes(state.studentView)) {
         await fetchBasicData({ silent: true });
@@ -2997,6 +3583,9 @@ document.addEventListener("click", async (event) => {
         await fetchApplications();
       } else if (state.adminView === "templateManage") {
         await fetchTemplates();
+      } else if (state.adminView === "importExport") {
+        await fetchBasicData({ silent: true });
+        await fetchAdminProcessNodes({ silent: true });
       }
       if (["dashboard", "users", "noticeManage", "training"].includes(state.adminView)) {
         await fetchBasicData({ silent: true });
@@ -3097,11 +3686,12 @@ document.addEventListener("click", async (event) => {
     "quick-search": null,
     "close-modal": null,
     "policy-search": "已根据关键词刷新知识库匹配结果。",
-    "download-template": "已模拟下载模板文件，后续可接入真实文件服务。",
+    "download-template": "请在具体业务模块中选择真实模板或数据文件。",
     "copy-link": "已复制官方渠道说明编号。",
     "student-new-application": "已定位到证明申请表。",
     "submit-material": "请在节点操作区上传材料。",
     "save-draft": "草稿已保存。",
+    "notice-save-draft": "通知草稿已保存。",
     "mark-all-read": "当前筛选范围已标记为已读。",
     "upload-transcript": "已模拟选择成绩单文件。",
     "new-notice": "已打开通知发布工作区。",
@@ -3110,7 +3700,7 @@ document.addEventListener("click", async (event) => {
     "add-node": "已准备新增流程节点。",
     "approval-return": "申请已模拟退回补充。",
     "approval-pass": "申请已模拟通过，电子证明将进入生成队列。",
-    "start-import": "已完成文件格式校验，等待预览确认。",
+    "start-import": "请选择一个导入类型后再上传 Excel 文件。",
     "table-action": "已打开该记录的操作入口。"
   };
 
@@ -3130,6 +3720,102 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "close-modal") {
     closeModal();
+    return;
+  }
+  if (action === "start-import") {
+    const configs = getImportExportConfigs();
+    if (!configs.length) {
+      showToast("暂无可导入的数据类型");
+      return;
+    }
+    pickImportFile(configs[0].type);
+    return;
+  }
+  if (action === "toggle-notice-tag") {
+    const tag = event.target.closest("[data-action]")?.dataset.tag;
+    if (!tag) return;
+    if (state.noticeDraftTags.includes(tag)) {
+      state.noticeDraftTags = state.noticeDraftTags.filter((item) => item !== tag);
+    } else {
+      state.noticeDraftTags = [...state.noticeDraftTags, tag];
+    }
+    updateNoticeTagSelectionUI();
+    return;
+  }
+  if (action === "toggle-notice-audience-grade") {
+    const grade = event.target.closest("[data-action]")?.dataset.grade;
+    if (!grade) return;
+    if (state.noticeAudienceGrades.includes(grade)) {
+      state.noticeAudienceGrades = state.noticeAudienceGrades.filter((item) => item !== grade);
+    } else {
+      state.noticeAudienceGrades = [...state.noticeAudienceGrades, grade];
+    }
+    updateNoticeTagSelectionUI();
+    return;
+  }
+  if (action === "load-notice-draft") {
+    const draftId = event.target.closest("[data-action]")?.dataset.id;
+    loadNoticeDraft(draftId);
+    return;
+  }
+  if (action === "delete-notice-draft") {
+    const draftId = event.target.closest("[data-action]")?.dataset.id;
+    deleteNoticeDraft(draftId);
+    updateNoticeDraftListUI();
+    showToast("通知草稿已删除");
+    return;
+  }
+  if (action === "notice-save-draft") {
+    const form = document.querySelector('form[data-form="notice"]');
+    if (!form) return;
+    const draft = await buildNoticeDraftFromForm(form);
+    const drafts = getStoredNoticeDrafts();
+    drafts.unshift(draft);
+    setStoredNoticeDrafts(drafts);
+    state.noticeDraftAttachment = draft.attachmentData ? { name: draft.attachmentName, data: draft.attachmentData } : null;
+    updateNoticeDraftListUI();
+    updateNoticeAttachmentHint();
+    showToast("通知草稿已保存");
+    return;
+  }
+  if (action === "view-notice") {
+    const noticeId = event.target.closest("[data-action]")?.dataset.id;
+    openNoticeDetail(noticeId);
+    return;
+  }
+  if (action === "preview-notice") {
+    const form = document.querySelector('form[data-form="notice"]');
+    if (!form) return;
+    const formData = new FormData(form);
+    const selectedTags = [...state.noticeDraftTags, ...parseCustomTags(formData.get("customTags"))];
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0];
+    const cachedAttachment = attachmentFile
+      ? { name: attachmentFile.name, data: "" }
+      : state.noticeDraftAttachment;
+    const audienceGrades = state.noticeAudienceGrades.length ? [...state.noticeAudienceGrades] : [...GRADE_OPTIONS];
+    const previewNotice = {
+      id: "preview-notice",
+      title: formData.get("title")?.toString().trim() || "未命名通知",
+      summary: formData.get("summary")?.toString().trim() || "",
+      text: formData.get("content")?.toString().trim() || "暂无正文内容",
+      target: audienceGrades.length === GRADE_OPTIONS.length ? "全体年级" : audienceGrades.join("、"),
+      time: new Date().toLocaleString(),
+      unread: true,
+      type: selectedTags[0] || "综合",
+      tags: Array.from(new Set(selectedTags)),
+      audienceGrades,
+      attachmentName: cachedAttachment?.name || "",
+      attachmentData: cachedAttachment?.data || ""
+    };
+    document.getElementById("noticeDetailModal")?.remove();
+    document.body.insertAdjacentHTML("beforeend", renderNoticeDetailModal(previewNotice));
+    return;
+  }
+  if (action === "publish-notice") {
+    const form = document.querySelector('form[data-form="notice"]');
+    if (form) {
+      form.requestSubmit();
+    }
     return;
   }
   if (action === "policy-form-reset" || action === "知识库管理-primary") {
@@ -3276,6 +3962,9 @@ document.addEventListener("click", async (event) => {
   if (action === "new-notice") {
     state.adminView = "noticeManage";
     state.role = "admin";
+    state.noticeDraftTags = ["就业", "党团"];
+    state.noticeAudienceGrades = [...GRADE_OPTIONS];
+    state.noticeDraftAttachment = null;
     saveCurrentView();
     render();
     showToast("已进入通知管理。");
@@ -3320,6 +4009,11 @@ document.addEventListener("change", async (event) => {
     event.target.value = "";
     await uploadTranscriptFile(file);
   }
+  if (event.target.matches('form[data-form="notice"] input[name="attachment"]')) {
+    const file = event.target.files?.[0] || null;
+    state.noticeDraftAttachment = file ? { name: file.name, data: "" } : null;
+    updateNoticeAttachmentHint();
+  }
 });
 
 document.addEventListener("submit", async (event) => {
@@ -3359,11 +4053,25 @@ document.addEventListener("submit", async (event) => {
 
   if (form.dataset.form === "notice") {
     const formData = new FormData(form);
+    const customTags = parseCustomTags(formData.get("customTags"));
+    const tags = Array.from(new Set([...state.noticeDraftTags, ...customTags]));
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
+    let attachmentData = state.noticeDraftAttachment?.data || "";
+    let attachmentName = state.noticeDraftAttachment?.name || "";
+    if (attachmentFile) {
+      attachmentData = await fileToDataUrl(attachmentFile);
+      attachmentName = attachmentFile.name;
+    }
     const payload = {
       title: formData.get("title")?.toString().trim(),
+      summary: formData.get("summary")?.toString().trim(),
       content: formData.get("content")?.toString().trim(),
-      target: "全体学生",
-      type: "综合",
+      target: state.noticeAudienceGrades.length === GRADE_OPTIONS.length ? "全体年级" : state.noticeAudienceGrades.join("、"),
+      type: tags[0] || "综合",
+      tags,
+      audienceGrades: state.noticeAudienceGrades.length ? state.noticeAudienceGrades : [...GRADE_OPTIONS],
+      attachmentName,
+      attachmentData,
       status: "published"
     };
     if (!payload.title || !payload.content) {
@@ -3379,6 +4087,9 @@ document.addEventListener("submit", async (event) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "通知发布失败");
       await fetchBasicData({ silent: true });
+      state.noticeDraftTags = ["就业", "党团"];
+      state.noticeAudienceGrades = [...GRADE_OPTIONS];
+      state.noticeDraftAttachment = null;
       form.reset();
       render();
       showToast("通知已发布并刷新列表。");
