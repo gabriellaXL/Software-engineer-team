@@ -1115,7 +1115,8 @@ async function getTemplateBytes(template) {
   }
 
   if (template.file_url) {
-    const res = await fetch(template.file_url, { credentials: 'same-origin' });
+    const templateUrl = resolveBackendAssetUrl(template.file_url);
+    const res = await fetch(templateUrl, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('模板文件下载失败');
     const arrayBuffer = await res.arrayBuffer();
     return new Uint8Array(arrayBuffer);
