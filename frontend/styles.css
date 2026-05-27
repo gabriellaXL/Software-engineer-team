@@ -604,6 +604,17 @@ svg {
   border-left: 4px solid var(--brand);
 }
 
+.notice-card {
+  cursor: pointer;
+}
+
+.notice-card:hover,
+.notice-card:focus-visible {
+  border-color: var(--brand);
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
 .list-card header {
   display: flex;
   align-items: flex-start;
@@ -868,6 +879,18 @@ tr:last-child td {
 
 .modal-head h2 {
   margin: 0;
+}
+
+.notice-detail-body {
+  display: grid;
+  gap: 14px;
+}
+
+.notice-detail-body p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.75;
+  white-space: pre-wrap;
 }
 
 .toast {

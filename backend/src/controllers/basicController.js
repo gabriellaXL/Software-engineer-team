@@ -123,6 +123,37 @@ function mapNotice(row) {
   };
 }
 
+async function getStudentProfile(userId) {
+  const { rows } = await db.query(
+    'SELECT student_id, grade FROM student_profile WHERE user_id = $1',
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+function canReceiveNotice(row, studentGrade) {
+  const audienceGrades = normalizeAudienceGradesInput(row.audience_grades);
+  if (!audienceGrades.length) return true;
+  return studentGrade ? audienceGrades.includes(String(studentGrade).trim()) : false;
+}
+
+async function upsertNoticeReadStatus(noticeId, studentId) {
+  const { rowCount } = await db.query(
+    `UPDATE notice_delivery
+     SET read_status = 'read', read_time = CURRENT_TIMESTAMP
+     WHERE notice_id = $1 AND student_id = $2`,
+    [noticeId, studentId]
+  );
+
+  if (rowCount === 0) {
+    await db.query(
+      `INSERT INTO notice_delivery (delivery_id, notice_id, student_id, read_status, read_time)
+       VALUES ($1, $2, $3, 'read', CURRENT_TIMESTAMP)`,
+      [`ND-${studentId}-${noticeId}`, noticeId, studentId]
+    );
+  }
+}
+
 function statusToText(status) {
   return status === 'active' ? '启用' : '停用';
 }
@@ -289,6 +320,53 @@ exports.deleteNotice = async (req, res) => {
     const { rowCount } = await db.query('DELETE FROM notice WHERE notice_id = $1', [noticeId]);
     if (!rowCount) return res.status(404).json({ error: 'Notice not found' });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.markNoticeRead = async (req, res) => {
+  const { noticeId } = req.params;
+
+  try {
+    await ensureNoticeSchema();
+    const student = await getStudentProfile(req.user.userId);
+    if (!student) return res.status(404).json({ error: 'Student profile not found' });
+
+    const { rows } = await db.query(
+      "SELECT * FROM notice WHERE notice_id = $1 AND COALESCE(status, 'published') <> 'draft'",
+      [noticeId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Notice not found' });
+    if (!canReceiveNotice(rows[0], student.grade)) {
+      return res.status(403).json({ error: 'Notice is not available for this student' });
+    }
+
+    await upsertNoticeReadStatus(noticeId, student.student_id);
+    res.json({ success: true, noticeId, unread: false });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.markAllNoticesRead = async (req, res) => {
+  try {
+    await ensureNoticeSchema();
+    const student = await getStudentProfile(req.user.userId);
+    if (!student) return res.status(404).json({ error: 'Student profile not found' });
+
+    const { rows } = await db.query(
+      "SELECT notice_id, audience_grades FROM notice WHERE COALESCE(status, 'published') <> 'draft'"
+    );
+    const readableNoticeIds = rows
+      .filter((row) => canReceiveNotice(row, student.grade))
+      .map((row) => row.notice_id);
+
+    for (const readableNoticeId of readableNoticeIds) {
+      await upsertNoticeReadStatus(readableNoticeId, student.student_id);
+    }
+
+    res.json({ success: true, count: readableNoticeIds.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

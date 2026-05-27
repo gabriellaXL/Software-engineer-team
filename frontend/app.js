@@ -526,6 +526,63 @@ async function fetchAdminProcessNodes(options = {}) {
   }
 }
 
+function getNoticeSourceRows() {
+  return getNoticeRows();
+}
+
+function getVisibleNoticeRows() {
+  const noticeRows = getNoticeSourceRows();
+  if (state.noticeFilter === STUDENT_NOTICE_FILTER_TAGS[0]) return noticeRows;
+  if (state.noticeFilter === STUDENT_NOTICE_FILTER_TAGS[STUDENT_NOTICE_FILTER_TAGS.length - 1]) {
+    return noticeRows.filter(hasOtherNoticeTag);
+  }
+  return noticeRows.filter((item) => (item.tags || []).includes(state.noticeFilter) || item.type === state.noticeFilter);
+}
+
+function setNoticeReadState(noticeIds) {
+  const ids = new Set(noticeIds.map(String));
+  state.notices = state.notices.map((item) => (
+    ids.has(String(item.id)) ? { ...item, unread: false } : item
+  ));
+  notices.forEach((item) => {
+    if (ids.has(String(item.id))) item.unread = false;
+  });
+}
+
+async function markNoticeRead(noticeId) {
+  const id = String(noticeId);
+  const current = getNoticeSourceRows().find((item) => String(item.id) === id);
+  if (!current || !current.unread) return;
+
+  if (state.token && (state.role === "student" || state.role === "student_leader")) {
+    const response = await fetch(`${API_BASE_URL}/basic/notices/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      headers: apiHeaders()
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "标记已读失败");
+  }
+
+  setNoticeReadState([id]);
+}
+
+async function markVisibleNoticesRead() {
+  const visibleIds = getVisibleNoticeRows().map((item) => String(item.id));
+  if (!visibleIds.length) return;
+
+  if (state.token && (state.role === "student" || state.role === "student_leader")) {
+    const response = await fetch(`${API_BASE_URL}/basic/notices/read-all`, {
+      method: "POST",
+      headers: apiHeaders()
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "全部已读失败");
+    await fetchBasicData({ silent: true });
+  } else {
+    setNoticeReadState(visibleIds);
+  }
+}
+
 function fallbackUserRecords() {
   return users.map((row, index) => ({
     id: `mock-user-${index}`,
@@ -2811,7 +2868,7 @@ function renderNoticeCard(item, options = {}) {
   const summary = item.summary || item.text || "";
   const tags = Array.isArray(item.tags) ? item.tags : [];
   return `
-    <article class="list-card ${item.unread ? "is-unread" : ""}">
+    <article class="list-card notice-card ${item.unread ? "is-unread" : ""}" data-notice-id="${escapeHtml(item.id)}" role="button" tabindex="0">
       <header>
         <h3>${escapeHtml(item.title)}</h3>
         ${badge(item.unread ? "未读" : "已读", item.unread ? "warning" : "neutral")}
@@ -3054,15 +3111,24 @@ function renderNoticeDetailModal(notice) {
   `;
 }
 
-function openNoticeDetail(noticeId) {
+async function openNoticeDetail(noticeId) {
   const noticeRows = getNoticeRows();
   const notice = noticeRows.find((item) => String(item.id) === String(noticeId));
   if (!notice) {
     showToast("未找到该通知");
     return;
   }
+
+  try {
+    await markNoticeRead(notice.id);
+  } catch (error) {
+    showToast(error.message);
+  }
+
+  render();
+  const refreshedNotice = getNoticeRows().find((item) => String(item.id) === String(noticeId)) || { ...notice, unread: false };
   document.getElementById("noticeDetailModal")?.remove();
-  document.body.insertAdjacentHTML("beforeend", renderNoticeDetailModal(notice));
+  document.body.insertAdjacentHTML("beforeend", renderNoticeDetailModal(refreshedNotice));
 }
 
 window.downloadNoticeAttachment = function(noticeId) {
@@ -3679,6 +3745,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const noticeCard = event.target.closest("[data-notice-id]");
+  if (noticeCard) {
+    await openNoticeDetail(noticeCard.dataset.noticeId);
+    return;
+  }
+
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
 
@@ -3780,7 +3852,7 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "view-notice") {
     const noticeId = event.target.closest("[data-action]")?.dataset.id;
-    openNoticeDetail(noticeId);
+    await openNoticeDetail(noticeId);
     return;
   }
   if (action === "preview-notice") {
@@ -3815,6 +3887,20 @@ document.addEventListener("click", async (event) => {
     const form = document.querySelector('form[data-form="notice"]');
     if (form) {
       form.requestSubmit();
+    }
+    return;
+  }
+  if (action === "close-notice-detail") {
+    document.getElementById("noticeDetailModal")?.remove();
+    return;
+  }
+  if (action === "mark-all-read") {
+    try {
+      await markVisibleNoticesRead();
+      render();
+      showToast(messages[action]);
+    } catch (error) {
+      showToast(error.message);
     }
     return;
   }
@@ -3992,6 +4078,14 @@ document.addEventListener("click", async (event) => {
     return;
   }
   showToast(messages[action] || "操作已完成。");
+});
+
+document.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const noticeCard = event.target.closest?.("[data-notice-id]");
+  if (!noticeCard) return;
+  event.preventDefault();
+  await openNoticeDetail(noticeCard.dataset.noticeId);
 });
 
 document.addEventListener("input", (event) => {
