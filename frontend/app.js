@@ -1084,8 +1084,9 @@ async function login(accountId, password, role) {
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
     if (state.role === "student" || state.role === "student_leader") {
       await fetchProcessData({ silent: true });
-      await fetchApplications();
     }
+    await fetchApplications();
+    await fetchTemplates();
     await fetchBasicData({ silent: true });
 
     // Redirect to home
@@ -2504,8 +2505,9 @@ function renderNewApplication() {
 }
 
 function renderAnalysis() {
-  const analysisCredits = getAnalysisCredits();
-  const publishedPlans = (state.planRecords.length ? state.planRecords : fallbackPlanRecords())
+  const hasAnalysisResult = !!state.analysisResult;
+  const analysisCredits = hasAnalysisResult ? getAnalysisCredits() : [];
+  const publishedPlans = state.planRecords
     .filter((item) => !item.status || item.status === "published" || item.statusName === "已发布");
   return `
     ${pageHead("成绩分析", "上传成绩单后与培养方案自动比对，生成缺失模块、学分达成度和选课建议。", [
@@ -2535,12 +2537,12 @@ function renderAnalysis() {
         <div class="panel-head">
           <div>
             <p class="eyebrow">学分达成度</p>
-            <h2>2024 版培养方案</h2>
+            <h2>${hasAnalysisResult ? "培养方案学分达成" : "暂无学分数据"}</h2>
           </div>
         </div>
-        <div class="credit-grid">
+        ${hasAnalysisResult ? `<div class="credit-grid">
           ${analysisCredits.map((item) => creditRow(item)).join("")}
-        </div>
+        </div>` : `<p class="muted-text" style="padding:12px 0">上传成绩单后可查看各模块学分达成情况。</p>`}
       </div>
     </section>
     <section class="panel" style="margin-top:14px">
@@ -2654,6 +2656,10 @@ function renderAdminView() {
 
 function renderAdminDashboard() {
   const pendingApprovals = (state.applications || []).filter(app => app.status === "待审核");
+  const studentCount = (state.userRecords || []).filter(u => u.role === "student" || u.role === "student_leader").length;
+  const templateCount = (state.templates || []).length;
+  const policyCount = (state.policies || []).length;
+  const recentApplications = (state.applications || []).slice().sort((a, b) => String(b.submit || "").localeCompare(String(a.submit || ""))).slice(0, 5);
   const noticeRows = getNoticeRows();
   return `
     ${pageHead("后台首页", "面向老师与管理人员的维护、审核、配置和批量数据处理工作台。", [
@@ -2661,12 +2667,12 @@ function renderAdminDashboard() {
     ])}
     <section class="grid four">
       ${metric("待处理事项", pendingApprovals.length.toString(), "需要您的审核", "amber")}
-      ${metric("平均响应", "1.8s", "常规查询 < 2s", "green")}
-      ${metric("知识库条目", "326", "本月新增 24", "brand")}
-      ${metric("导入任务", "4", "2 个待校验", "teal")}
+      ${metric("模板数量", templateCount.toString(), "可下载模板", "green")}
+      ${metric("知识库条目", policyCount.toString(), "政策与知识库", "brand")}
+      ${metric("学生数量", studentCount.toString(), "用户管理中的学生总数", "teal")}
     </section>
     <section class="admin-layout" style="margin-top:14px">
-      <div class="panel">
+      <div class="panel" style="flex:1">
         <div class="panel-head">
           <div>
             <p class="eyebrow">审批队列</p>
@@ -2684,33 +2690,50 @@ function renderAdminDashboard() {
           ["-", "暂无待审批事项", "-", "-", "-"]
         ])}
       </div>
-      <div class="admin-main-list">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">近期通知</p>
-              <h2>精准推送</h2>
-            </div>
+      <div class="panel" style="width:320px;flex-shrink:0">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">近期通知</p>
+            <h2>站内公告</h2>
           </div>
-          <div class="notice-list">
-            ${noticeRows.length
-              ? noticeRows.slice(0, 2).map(renderNoticeCard).join("")
-              : `<article class="list-card"><h3>暂无通知</h3><p>${escapeHtml(state.noticeError ? `通知接口异常：${state.noticeError}` : "当前通知表为空，可在通知管理中发布。")}</p></article>`
-            }
-          </div>
+          <button class="ghost-button" type="button" data-nav="admin" data-view="noticeManage">${icon("bell")}管理</button>
         </div>
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">系统提示</p>
-              <h2>数据健康</h2>
-            </div>
-          </div>
-          <div class="result-list">
-            ${reminder("用户权限未发现异常", "4 级权限体系已覆盖学院领导、管理老师、班团骨干、普通学生。", "success")}
-            ${reminder("待校验导入文件 2 个", "建议在写入 Kingbase 前完成字段预览确认。", "warning")}
-          </div>
+        <div class="notice-list" style="max-height:280px;overflow-y:auto">
+          ${noticeRows.length ? noticeRows.slice(0, 4).map(item => `
+            <article class="list-card" style="padding:10px 12px">
+              <header>
+                <h3 style="font-size:13px">${escapeHtml(item.title || "-")}</h3>
+              </header>
+              <p style="font-size:12px;color:#64748b;margin:4px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.summary || item.text || "")}</p>
+              <div class="list-meta"><span>${escapeHtml(item.time || "-")}</span></div>
+            </article>
+          `).join("") : `<p class="muted-text" style="font-size:13px;padding:8px 0">暂无通知</p>`}
         </div>
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">近期动态</p>
+          <h2>系统使用情况</h2>
+        </div>
+      </div>
+      <div class="notice-list">
+        ${recentApplications.length ? recentApplications.map(item => `
+          <article class="list-card">
+            <header>
+              <div>
+                <h3>${escapeHtml(item.applicant || "-")}</h3>
+                <p>${escapeHtml(item.type || "未知类型")}</p>
+              </div>
+              ${badge(escapeHtml(item.status || "-"), item.status === "待审核" ? "warning" : item.status === "待补充" ? "danger" : "success")}
+            </header>
+            <div class="list-meta">
+              <span>${escapeHtml(item.submit || "-")}</span>
+              <span>${escapeHtml(item.id || "")}</span>
+            </div>
+          </article>
+        `).join("") : `<p class="muted-text">暂无申请记录</p>`}
       </div>
     </section>
   `;
@@ -3387,7 +3410,7 @@ window.downloadAttachment = function(id) {
 };
 
 window.downloadPlanAttachment = function(id) {
-  const plan = (state.planRecords || fallbackPlanRecords()).find((item) => String(item.id || item.plan_id) === String(id));
+  const plan = (state.planRecords || []).find((item) => String(item.id || item.plan_id) === String(id));
   if (!plan?.attachmentData) {
     showToast("该培养方案暂未上传附件");
     return;
@@ -3537,21 +3560,22 @@ window.deleteTemplate = async function(id) {
 };
 
 function renderTrainingManage() {
-  const planRecords = state.planRecords.length ? state.planRecords : fallbackPlanRecords();
+  const planRecords = state.planRecords;
   const editingPlan = planRecords.find((item) => String(item.id || item.plan_id) === String(state.editingPlanId));
+  const hasPlans = planRecords.length > 0;
   return adminPageWithTable(
     "培养方案",
     "维护专业培养方案、课程模块要求和学分比对规则。",
-    ["导入方案", "新建方案"],
+    ["", "新建方案"],
     ["方案名称", "适用年级", "状态", "培养方案文件", "最近更新", "操作"],
-    planRecords.map((item) => [
+    hasPlans ? planRecords.map((item) => [
       escapeHtml(item.name || "-"),
       escapeHtml(item.grade || "-"),
       badge(escapeHtml(item.statusName || item.status || "-"), item.status === "published" ? "success" : item.status === "pending" ? "warning" : "neutral"),
       item.attachmentName ? escapeHtml(item.attachmentName) : `<span class="muted-text">未上传</span>`,
       escapeHtml(item.updatedAt || "-"),
       `${actionButton("编辑", "plan-edit", item.id || item.plan_id)} ${actionButton("删除", "plan-delete", item.id || item.plan_id)}`
-    ]),
+    ]) : [[`<span class="muted-text">暂无培养方案</span>`, "", "", "", "", ""]],
     `
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">${editingPlan ? "编辑方案" : "新建方案"}</p><h2>方案信息</h2></div></div>
@@ -3586,12 +3610,6 @@ function renderTrainingManage() {
             <button class="primary-button" type="submit">${icon("check")}${editingPlan ? "保存方案" : "创建方案"}</button>
           </div>
         </form>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">课程模块</p><h2>学分要求</h2></div></div>
-        <div class="credit-grid">
-          ${credits.map((item) => creditRow(item)).join("")}
-        </div>
       </div>
     `
   );
@@ -4050,10 +4068,7 @@ function renderAnalysisSuggestions() {
       type
     );
   }
-  return `
-    ${reminder("专业选修缺少 8 学分", "建议优先选择数据库系统实践、人工智能导论等方向课程。", "warning")}
-    ${reminder("实践环节缺少 2 学分", "可通过科研训练或学院认定竞赛补足。", "success")}
-  `;
+  return reminder("暂无选课建议", "请上传成绩单，系统将根据培养方案生成个性化选课建议。", "info");
 }
 
 function getAnalysisCredits() {
@@ -4077,10 +4092,7 @@ function renderTranscriptTasks() {
       state.analysisResult ? "1 个建议" : "等待结果"
     ]]);
   }
-  return table(["任务号", "上传时间", "状态", "结果"], [
-    ["TR-202605-006", "2026-05-16", badge("解析成功", "success"), "2 个建议"],
-    ["TR-202604-014", "2026-04-20", badge("人工核对", "warning"), "已处理"]
-  ]);
+  return `<p class="muted-text" style="padding:12px 0">暂无成绩单解析记录，请上传成绩单开始分析。</p>`;
 }
 
 function filteredPolicies() {
@@ -4384,7 +4396,7 @@ document.addEventListener("click", async (event) => {
   const planEdit = event.target.closest("[data-action='plan-edit']");
   if (planEdit) {
     state.editingPlanId = planEdit.dataset.id;
-    const planRecords = state.planRecords.length ? state.planRecords : fallbackPlanRecords();
+    const planRecords = state.planRecords;
     const editingPlan = planRecords.find((item) => String(item.id || item.plan_id) === String(state.editingPlanId));
     state.planDraftAttachment = editingPlan?.attachmentName
       ? { name: editingPlan.attachmentName, data: editingPlan.attachmentData || "" }
