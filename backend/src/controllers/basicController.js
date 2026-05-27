@@ -2,6 +2,7 @@ const db = require('../config/db');
 const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 
 let noticeSchemaReady = false;
+const ALL_GRADE_OPTIONS = ['大一', '大二', '大三', '大四'];
 
 async function ensureNoticeSchema() {
   if (noticeSchemaReady) return;
@@ -87,6 +88,13 @@ function normalizeAudienceGradesInput(value) {
   return [];
 }
 
+function isAllAudienceGrades(value) {
+  const audienceGrades = normalizeAudienceGradesInput(value);
+  if (!audienceGrades.length) return false;
+  if (audienceGrades.length !== ALL_GRADE_OPTIONS.length) return false;
+  return ALL_GRADE_OPTIONS.every((grade) => audienceGrades.includes(grade));
+}
+
 function pad(value) {
   return String(value).padStart(2, '0');
 }
@@ -134,6 +142,7 @@ async function getStudentProfile(userId) {
 function canReceiveNotice(row, studentGrade) {
   const audienceGrades = normalizeAudienceGradesInput(row.audience_grades);
   if (!audienceGrades.length) return true;
+  if (isAllAudienceGrades(audienceGrades)) return true;
   return studentGrade ? audienceGrades.includes(String(studentGrade).trim()) : false;
 }
 
@@ -237,6 +246,7 @@ exports.getNotices = async (req, res) => {
         if (!(req.user.role === 'student' || req.user.role === 'student_leader')) return true;
         const audienceGrades = normalizeAudienceGradesInput(row.audience_grades);
         if (!audienceGrades.length) return true;
+        if (isAllAudienceGrades(audienceGrades)) return true;
         const studentGrade = String(row.student_grade || '').trim();
         return studentGrade ? audienceGrades.includes(studentGrade) : false;
       })
