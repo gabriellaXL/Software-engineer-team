@@ -37,6 +37,7 @@ const state = {
   editingPolicyId: null,
   processNodes: [],
   processRecords: [],
+  processSubmissions: [],
   processDrafts: [],
   processHistory: [],
   studentProcessType: "party",
@@ -405,20 +406,145 @@ function getProcessSubmissionStatusMeta(status) {
     : { label: "草稿", tone: "neutral" };
 }
 
+function parseProcessDateValue(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getProcessNodeStartAt(node) {
+  return parseProcessDateValue(node?.start_at || node?.scheduled_at);
+}
+
+function getProcessNodeDueAt(node) {
+  return parseProcessDateValue(node?.due_at);
+}
+
+function getProcessNodeWindowText(node, fallback = "未设置") {
+  const startText = node?.start_at || node?.scheduled_at ? formatProcessDate(node.start_at || node.scheduled_at, "") : "";
+  const dueText = node?.due_at ? formatProcessDate(node.due_at, "") : "";
+  if (startText && dueText) return `${startText} 至 ${dueText}`;
+  if (startText) return `开始：${startText}`;
+  if (dueText) return `截止：${dueText}`;
+  return fallback;
+}
+
+function getLatestProcessSubmissionMap() {
+  const latestMap = new Map();
+  (state.processSubmissions || []).forEach((item) => {
+    const key = String(item.nodeId || "");
+    if (!key || latestMap.has(key)) return;
+    latestMap.set(key, item);
+  });
+  return latestMap;
+}
+
+function isCompletedProcessRecord(record) {
+  return normalizeProcessStatus(record?.status) === "done";
+}
+
+function isResolvedProcessNode(node, submissionMap, recordMap) {
+  const record = recordMap.get(node.node_id);
+  if (isCompletedProcessRecord(record)) return true;
+  const submission = submissionMap.get(String(node.node_id));
+  return ["approved"].includes(String(submission?.status || "").toLowerCase());
+}
+
+function getCurrentProcessStageNode() {
+  if (!state.processNodes.length) return null;
+  const recordMap = new Map((state.processRecords || []).map((record) => [record.node_id, record]));
+  const submissionMap = getLatestProcessSubmissionMap();
+  return state.processNodes.find((node) => !isResolvedProcessNode(node, submissionMap, recordMap)) || state.processNodes[state.processNodes.length - 1] || null;
+}
+
+function getProcessSubmissionAvailability(nodeId) {
+  const node = (state.processNodes || []).find((item) => String(item.node_id) === String(nodeId));
+  if (!node) {
+    return { allowed: false, message: "请选择有效的流程节点。" };
+  }
+  const now = new Date();
+  const startAt = getProcessNodeStartAt(node);
+  const dueAt = getProcessNodeDueAt(node);
+  if (startAt && now < startAt) {
+    return { allowed: false, message: `该节点尚未到开始时间，需从 ${formatProcessDate(node.start_at || node.scheduled_at, "未设置")} 起才能提交。` };
+  }
+  if (dueAt && now > dueAt) {
+    return { allowed: false, message: `该节点已超过截止时间 ${formatProcessDate(node.due_at, "未设置")}，当前不可提交。` };
+  }
+  return { allowed: true, message: "" };
+}
+
+function getCurrentProcessTodo() {
+  const stageNode = getCurrentProcessStageNode();
+  if (!stageNode) return null;
+  const submissionMap = getLatestProcessSubmissionMap();
+  const latestSubmission = submissionMap.get(String(stageNode.node_id));
+  const latestStatus = String(latestSubmission?.status || "").toLowerCase();
+  if (["pending", "approved"].includes(latestStatus)) return null;
+
+  const availability = getProcessSubmissionAvailability(stageNode.node_id);
+  if (!availability.allowed) return null;
+
+  const detailParts = [];
+  detailParts.push(`提交窗口：${getProcessNodeWindowText(stageNode, "未设置")}`);
+  if (latestStatus === "rejected" && latestSubmission?.reviewComment) {
+    detailParts.push(`审批意见：${latestSubmission.reviewComment}`);
+  } else if (latestStatus === "draft") {
+    detailParts.push("已保存草稿，尚未正式提交。");
+  }
+  if (stageNode.reminder_rule) detailParts.push(stageNode.reminder_rule);
+
+  return {
+    id: stageNode.node_id,
+    name: stageNode.node_name || "未命名节点",
+    detail: detailParts.join(" · ") || "请在当前开放时间内提交本节点材料。"
+  };
+}
+
+function getPendingSupplementApplications() {
+  return (state.applications || []).filter((item) => item.status === "待补充");
+}
+
+function getStudentTodoItems() {
+  const items = [];
+  const processTodo = getCurrentProcessTodo();
+  if (processTodo) {
+    items.push({
+      type: "process",
+      title: `${processTodo.name}待提交`,
+      detail: processTodo.detail,
+      tone: "warning"
+    });
+  }
+
+  const supplementApps = getPendingSupplementApplications();
+  if (supplementApps.length) {
+    const first = supplementApps[0];
+    items.push({
+      type: "application",
+      title: supplementApps.length > 1 ? `证明申请待补交 ${supplementApps.length} 项` : "证明申请需补交材料",
+      detail: first.admin_comment || first.comment || "请在证明申请记录中补充材料后重新提交。",
+      tone: "danger"
+    });
+  }
+
+  return items;
+}
+
 function getCurrentProcessNode() {
+  const stageNode = getCurrentProcessStageNode();
+  if (!stageNode) return null;
   const timeline = getProcessTimeline();
-  return timeline.find((item) => item.status === "active") || timeline.find((item) => item.status === "next") || null;
+  return timeline.find((item) => String(item.id) === String(stageNode.node_id)) || null;
 }
 
 function getCurrentProcessStageText() {
-  const currentNode = getCurrentProcessNode();
-  return currentNode ? `${getProcessTypeLabel(getStudentProcessType())} / ${currentNode.name}` : `${getProcessTypeLabel(getStudentProcessType())} / 暂无流程节点`;
+  const stageNode = getCurrentProcessStageNode();
+  return stageNode ? `${getProcessTypeLabel(getStudentProcessType())} / ${stageNode.node_name || stageNode.name}` : `${getProcessTypeLabel(getStudentProcessType())} / 暂无流程节点`;
 }
 
 function getProcessPendingCount() {
-  const activeCount = getProcessTimeline().filter((item) => item.status === "active").length;
-  const pendingDraftCount = Array.isArray(state.processDrafts) ? state.processDrafts.length : 0;
-  return activeCount + pendingDraftCount;
+  return getStudentTodoItems().length;
 }
 
 function getUnreadNoticeCount() {
@@ -467,27 +593,41 @@ function getProcessTimeline() {
   if (!state.processNodes.length) return [];
 
   const recordByNodeId = new Map(state.processRecords.map((record) => [record.node_id, record]));
-  let hasActive = false;
+  const submissionMap = getLatestProcessSubmissionMap();
+  const currentStageNode = getCurrentProcessStageNode();
+  const now = new Date();
 
   return state.processNodes.map((node) => {
     const record = recordByNodeId.get(node.node_id);
-    let status = record ? normalizeProcessStatus(record.status) : "next";
-    if (status === "active") hasActive = true;
-    if (!record && !hasActive) {
-      status = "active";
-      hasActive = true;
-    }
-    const scheduledText = node.scheduled_at ? formatProcessDate(node.scheduled_at, "") : "";
+    const latestSubmission = submissionMap.get(String(node.node_id));
+    const startDate = getProcessNodeStartAt(node);
+    const dueDate = getProcessNodeDueAt(node);
+    const scheduledText = getProcessNodeWindowText(node, "");
     const completedText = record?.completed_time ? formatProcessDate(record.completed_time, "") : "";
     const detailParts = [];
-    if (scheduledText) detailParts.push(`节点时间：${scheduledText}`);
+    let status = "next";
+    if (isResolvedProcessNode(node, submissionMap, recordByNodeId)) {
+      status = "done";
+    } else if (currentStageNode && String(currentStageNode.node_id) === String(node.node_id) && (!startDate || now >= startDate)) {
+      status = "active";
+    }
+    if (startDate) detailParts.push(`开始：${formatProcessDate(node.start_at || node.scheduled_at, "未设置")}`);
+    if (dueDate) detailParts.push(`截止：${formatProcessDate(node.due_at, "未设置")}`);
     if (status === "done" && completedText) detailParts.push(`完成时间：${completedText}`);
+    if (String(latestSubmission?.status || "").toLowerCase() === "pending") {
+      detailParts.push("材料已提交，等待管理员审核。");
+    }
+    if (String(latestSubmission?.status || "").toLowerCase() === "rejected") {
+      detailParts.push(`已退回补充${latestSubmission.reviewComment ? `：${latestSubmission.reviewComment}` : ""}`);
+    }
     if (node.reminder_rule || record?.comment) detailParts.push(node.reminder_rule || record?.comment);
     return {
       id: node.node_id,
       name: node.node_name || node.name || "未命名节点",
       status,
-      date: scheduledText || (status === "done" ? formatProcessDate(record?.completed_time) : (status === "active" ? "进行中" : "待激活")),
+      date: status === "done"
+        ? formatProcessDate(record?.completed_time, "已完成")
+        : (startDate && now < startDate ? formatProcessDate(node.start_at || node.scheduled_at, "待激活") : (dueDate ? `截止 ${formatProcessDate(node.due_at, "")}` : (status === "active" ? "进行中" : "待激活"))),
       detail: detailParts.join(" · ") || "请按流程要求完成当前节点。"
     };
   });
@@ -499,6 +639,7 @@ async function fetchProcessData(options = {}) {
   if (!state.token || !canViewProcess) {
     state.processNodes = [];
     state.processRecords = [];
+    state.processSubmissions = [];
     state.processDrafts = [];
     state.processHistory = [];
     state.processError = "";
@@ -510,20 +651,23 @@ async function fetchProcessData(options = {}) {
   if (options.renderBefore) render();
 
   try {
-    const [nodesResponse, progressResponse, draftsResponse, rejectedResponse, historyResponse] = await Promise.all([
+    const [nodesResponse, progressResponse, submissionsResponse, draftsResponse, rejectedResponse, historyResponse] = await Promise.all([
       fetch(`${API_BASE_URL}/process/nodes?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
       fetch(`${API_BASE_URL}/process/progress?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/process/submissions?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
       fetch(`${API_BASE_URL}/process/submissions?status=draft&processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
       fetch(`${API_BASE_URL}/process/submissions?status=rejected&processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
       fetch(`${API_BASE_URL}/process/history?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() })
     ]);
     const nodes = await nodesResponse.json();
     const progress = await progressResponse.json();
+    const submissions = await submissionsResponse.json();
     const drafts = await draftsResponse.json();
     const rejected = await rejectedResponse.json();
     const history = await historyResponse.json();
     if (!nodesResponse.ok) throw new Error(nodes.error || "流程节点获取失败");
     if (!progressResponse.ok) throw new Error(progress.error || "学生进度获取失败");
+    if (!submissionsResponse.ok) throw new Error(submissions.error || "流程提交记录获取失败");
     if (!draftsResponse.ok) throw new Error(drafts.error || "流程草稿获取失败");
     if (!rejectedResponse.ok) throw new Error(rejected.error || "流程退回记录获取失败");
     if (!historyResponse.ok) throw new Error(history.error || "流程历史获取失败");
@@ -535,11 +679,13 @@ async function fetchProcessData(options = {}) {
       });
     state.processNodes = Array.isArray(nodes) ? nodes : [];
     state.processRecords = Array.isArray(progress) ? progress : [];
+    state.processSubmissions = Array.isArray(submissions) ? submissions : [];
     state.processDrafts = editableSubmissions;
     state.processHistory = Array.isArray(history) ? history : [];
     return getProcessTimeline();
   } catch (error) {
     state.processError = error.message;
+    state.processSubmissions = [];
     state.processDrafts = [];
     state.processHistory = [];
     if (!options.silent) showToast(`流程接口异常：${error.message}`);
@@ -1718,13 +1864,14 @@ function renderStudentHome() {
     : "0/0";
   const currentStageText = getCurrentProcessStageText();
   const processReminder = getCurrentProcessNode();
+  const todoItems = getStudentTodoItems();
   return `
     ${pageHead(`上午好，${escapeHtml(userName)}`, `待办 ${getProcessPendingCount()} 项 · 未读通知 ${unreadNoticeCount} 条 · 当前党团阶段：${escapeHtml(currentStageText)}`, [
       ["quick-search", "检索政策", "search", "ghost-button"],
       ["student-new-application", "提交申请", "plus", "primary-button"]
     ])}
     <section class="grid four">
-      ${metric("待办提醒", String(getProcessPendingCount()), processReminder ? `${processReminder.name}待处理` : "暂无待办", "amber")}
+      ${metric("待办提醒", String(getProcessPendingCount()), todoItems.length ? todoItems[0].title : "暂无待办", "amber")}
       ${metric("未读通知", String(unreadNoticeCount), "按标签和年级筛选推送", "brand")}
       ${metric("流程进度", processSummary, processReminder ? `${processReminder.name}进行中` : "等待管理员配置流程", "green")}
       ${metric("证明记录", String(applicationCount), "近一年审批留痕", "teal")}
@@ -1755,12 +1902,10 @@ function renderStudentHome() {
           </div>
         </div>
         <div class="reminder-list">
-          ${processReminder
-            ? reminder(`${processReminder.name}待处理`, processReminder.detail || "请按流程要求提交当前阶段材料。", "warning")
-            : reminder("暂无党团待办", "当前没有激活中的党团流程节点。", "success")
+          ${todoItems.length
+            ? todoItems.map((item) => reminder(item.title, item.detail, item.tone)).join("")
+            : reminder("暂无待办", "当前没有党团待办，也没有需要补交材料的证明申请。", "success")
           }
-          ${reminder("证明申请需补充材料", "在读证明申请缺少用途说明，可在申请记录中补交。", "danger")}
-          ${reminder("成绩分析建议更新", "本学期课程信息已变化，建议重新上传成绩单。", "success")}
         </div>
       </div>
     </section>
@@ -1869,6 +2014,7 @@ function renderProcess() {
   const draftRows = Array.isArray(state.processDrafts) ? state.processDrafts : [];
   const currentProcessType = getStudentProcessType();
   const materialOptions = getProcessMaterialOptions(currentProcessType);
+  const selectedNodeAvailability = getProcessSubmissionAvailability(formState.nodeId);
   return `
     ${pageHead("党团流程", "线性展示入党/入团全过程，支持节点提醒、材料提交和审批退回处理。", [
       ["submit-material", "提交材料", "upload", "primary-button"]
@@ -1908,7 +2054,7 @@ function renderProcess() {
           <label class="field full">
             <span>所属节点</span>
             <select name="nodeId" required>
-              ${state.processNodes.map((node) => `<option value="${escapeHtml(node.node_id)}" ${String(formState.nodeId) === String(node.node_id) ? "selected" : ""}>${escapeHtml(node.node_name)}${node.scheduled_at ? `（${escapeHtml(formatProcessDate(node.scheduled_at, ""))}）` : ""}</option>`).join("")}
+              ${state.processNodes.map((node) => `<option value="${escapeHtml(node.node_id)}" ${String(formState.nodeId) === String(node.node_id) ? "selected" : ""}>${escapeHtml(node.node_name)}${getProcessNodeWindowText(node, "") ? `（${escapeHtml(getProcessNodeWindowText(node, ""))}）` : ""}</option>`).join("")}
             </select>
           </label>
           <label class="field full">
@@ -1927,6 +2073,13 @@ function renderProcess() {
             <span>说明</span>
             <textarea name="description" placeholder="补充本次提交说明">${escapeHtml(formState.description)}</textarea>
           </label>
+          <label class="field full">
+            <span>提交窗口</span>
+            <input type="text" value="${escapeHtml(getProcessNodeWindowText((state.processNodes || []).find((node) => String(node.node_id) === String(formState.nodeId)), "请选择节点后查看"))}" disabled style="background:#f1f5f9;cursor:not-allowed;" />
+          </label>
+          ${selectedNodeAvailability.allowed ? "" : `
+            <p style="margin:0;color:#b45309;">${escapeHtml(selectedNodeAvailability.message)}</p>
+          `}
           <label class="field full">
             <span>附件</span>
             <input name="attachment" type="file" />
@@ -2789,11 +2942,12 @@ function renderProcessConfig() {
     <section class="grid two">
       <div class="panel">
         <div class="panel-head"><div><p class="eyebrow">节点列表</p><h2>${escapeHtml(getProcessTypeLabel(currentProcessType))}</h2></div></div>
-        ${state.processNodes.length ? table(["顺序", "节点名称", "流程类型", "节点时间", "提醒规则", "操作"], state.processNodes.map((node) => [
+        ${state.processNodes.length ? table(["顺序", "节点名称", "流程类型", "开始时间", "截止时间", "提醒规则", "操作"], state.processNodes.map((node) => [
           escapeHtml(String(node.sequence || "")),
           escapeHtml(node.node_name || ""),
           escapeHtml(getProcessTypeLabel(node.process_type || "party")),
-          escapeHtml(formatProcessDate(node.scheduled_at, "未设置")),
+          escapeHtml(formatProcessDate(node.start_at || node.scheduled_at, "未设置")),
+          escapeHtml(formatProcessDate(node.due_at, "未设置")),
           escapeHtml(node.reminder_rule || "未配置"),
           `<div class="toolbar"><button type="button" class="ghost-button" data-action="process-node-edit" data-id="${escapeHtml(node.node_id)}">编辑</button><button type="button" class="ghost-button" data-action="process-node-delete" data-id="${escapeHtml(node.node_id)}">删除</button></div>`
         ])) : `<article class="list-card"><h3>暂无流程节点</h3><p>请先在右侧创建党团流程节点。</p></article>`}
@@ -2820,8 +2974,12 @@ function renderProcessConfig() {
             <textarea name="nodeDetail" placeholder="补充该节点的流程要求、所需材料、注意事项等。">${escapeHtml(editingNode?.node_detail || "")}</textarea>
           </label>
           <label class="field full">
-            <span>节点时间</span>
-            <input name="scheduledAt" type="datetime-local" value="${escapeHtml(formatDateTimeLocalValue(editingNode?.scheduled_at))}" />
+            <span>开始时间</span>
+            <input name="startAt" type="datetime-local" value="${escapeHtml(formatDateTimeLocalValue(editingNode?.start_at || editingNode?.scheduled_at))}" />
+          </label>
+          <label class="field full">
+            <span>截止时间</span>
+            <input name="dueAt" type="datetime-local" value="${escapeHtml(formatDateTimeLocalValue(editingNode?.due_at))}" />
           </label>
           <label class="field full">
             <span>提醒规则</span>
@@ -2988,7 +3146,8 @@ function renderProcessNodeDetailModal(node) {
         <div class="stack">
           <p><strong>流程类型：</strong>${escapeHtml(getProcessTypeLabel(node.process_type || "party"))}</p>
           <p><strong>顺序：</strong>${escapeHtml(String(node.sequence || "-"))}</p>
-          <p><strong>节点时间：</strong>${escapeHtml(formatProcessDate(node.scheduled_at, "未设置"))}</p>
+          <p><strong>开始时间：</strong>${escapeHtml(formatProcessDate(node.start_at || node.scheduled_at, "未设置"))}</p>
+          <p><strong>截止时间：</strong>${escapeHtml(formatProcessDate(node.due_at, "未设置"))}</p>
           <p><strong>提醒规则：</strong>${escapeHtml(node.reminder_rule || "未设置")}</p>
           <p style="margin-top: 12px;"><strong>详细说明：</strong></p>
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;white-space:pre-wrap;">${escapeHtml(node.node_detail || "管理员暂未补充详细说明。")}</div>
@@ -4599,6 +4758,7 @@ document.addEventListener("click", async (event) => {
     const form = document.querySelector('form[data-form="process"]');
     if (!form) return;
     const formData = new FormData(form);
+    const nodeId = formData.get("nodeId")?.toString() || "";
     const selectedMaterialType = formData.get("materialType")?.toString() || "";
     const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
     const materialType = selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType;
@@ -4611,7 +4771,7 @@ document.addEventListener("click", async (event) => {
     }
     const payload = {
       submissionId: state.editingProcessDraftId || undefined,
-      nodeId: formData.get("nodeId")?.toString(),
+      nodeId,
       materialType,
       description: formData.get("description")?.toString().trim(),
       attachmentName,
@@ -4624,6 +4784,11 @@ document.addEventListener("click", async (event) => {
     }
     if (selectedMaterialType === "其他" && !customMaterialType) {
       showToast("请选择“其他”时请补充具体材料名称。");
+      return;
+    }
+    const availability = getProcessSubmissionAvailability(nodeId);
+    if (!availability.allowed) {
+      showToast(availability.message);
       return;
     }
     try {
@@ -5061,6 +5226,24 @@ document.addEventListener("change", async (event) => {
       render();
     }
   }
+  if (event.target.matches('form[data-form="process"] select[name="nodeId"]')) {
+    const form = event.target.closest('form[data-form="process"]');
+    if (form) {
+      const formData = new FormData(form);
+      const processType = getStudentProcessType();
+      const selectedMaterialType = formData.get("materialType")?.toString() || getProcessBaseMaterialOptions(processType)[0];
+      const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
+      state.processForm = {
+        nodeId: formData.get("nodeId")?.toString() || "",
+        materialType: selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType,
+        customMaterialType,
+        description: formData.get("description")?.toString() || "",
+        attachmentName: state.processDraftAttachment?.name || state.processForm?.attachmentName || "",
+        attachmentData: state.processDraftAttachment?.data || state.processForm?.attachmentData || ""
+      };
+      render();
+    }
+  }
   if (event.target.matches('form[data-form="process-node"] input[name="attachment"]')) {
     const file = event.target.files?.[0] || null;
     state.processNodeAttachment = file ? { name: file.name, data: "" } : null;
@@ -5171,6 +5354,7 @@ document.addEventListener("submit", async (event) => {
 
   if (form.dataset.form === "process") {
     const formData = new FormData(form);
+    const nodeId = formData.get("nodeId")?.toString() || "";
     const selectedMaterialType = formData.get("materialType")?.toString() || "";
     const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
     const materialType = selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType;
@@ -5183,7 +5367,7 @@ document.addEventListener("submit", async (event) => {
     }
     const payload = {
       submissionId: state.editingProcessDraftId || undefined,
-      nodeId: formData.get("nodeId")?.toString(),
+      nodeId,
       materialType,
       description: formData.get("description")?.toString().trim(),
       attachmentName,
@@ -5196,6 +5380,11 @@ document.addEventListener("submit", async (event) => {
     }
     if (selectedMaterialType === "其他" && !customMaterialType) {
       showToast("请选择“其他”时请补充具体材料名称。");
+      return;
+    }
+    const availability = getProcessSubmissionAvailability(nodeId);
+    if (!availability.allowed) {
+      showToast(availability.message);
       return;
     }
     try {
@@ -5231,7 +5420,8 @@ document.addEventListener("submit", async (event) => {
       sequence: Number(formData.get("sequence")),
       nodeName: formData.get("nodeName")?.toString().trim(),
       nodeDetail: formData.get("nodeDetail")?.toString().trim(),
-      scheduledAt: formData.get("scheduledAt")?.toString().trim(),
+      startAt: formData.get("startAt")?.toString().trim(),
+      dueAt: formData.get("dueAt")?.toString().trim(),
       reminderRule: formData.get("reminderRule")?.toString().trim(),
       attachmentName,
       attachmentData

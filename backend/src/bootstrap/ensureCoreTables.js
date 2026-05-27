@@ -13,6 +13,8 @@ async function ensureCoreTables() {
       sequence INTEGER,
       reminder_rule VARCHAR(255),
       scheduled_at TIMESTAMP,
+      start_at TIMESTAMP,
+      due_at TIMESTAMP,
       node_detail TEXT,
       attachment_name VARCHAR(255),
       attachment_data TEXT
@@ -103,6 +105,8 @@ async function ensureCoreTables() {
       ADD COLUMN IF NOT EXISTS sequence INTEGER,
       ADD COLUMN IF NOT EXISTS reminder_rule VARCHAR(255),
       ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS start_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS due_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS node_detail TEXT,
       ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
       ADD COLUMN IF NOT EXISTS attachment_data TEXT

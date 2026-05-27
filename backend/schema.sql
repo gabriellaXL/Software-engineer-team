@@ -64,6 +64,8 @@ CREATE TABLE party_process_node (
     sequence INTEGER,
     reminder_rule VARCHAR(100),
     scheduled_at TIMESTAMP,
+    start_at TIMESTAMP,
+    due_at TIMESTAMP,
     node_detail TEXT,
     attachment_name VARCHAR(255),
     attachment_data TEXT

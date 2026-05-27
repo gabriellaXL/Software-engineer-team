@@ -296,7 +296,8 @@ const IMPORT_EXPORT_TYPES = {
       { key: 'processType', label: '流程类型' },
       { key: 'nodeName', label: '节点名称' },
       { key: 'sequence', label: '顺序' },
-      { key: 'scheduledAt', label: '节点时间' },
+      { key: 'startAt', label: '开始时间' },
+      { key: 'dueAt', label: '截止时间' },
       { key: 'nodeDetail', label: '详细说明' },
       { key: 'attachmentName', label: '附件名称' },
       { key: 'attachmentData', label: '附件内容' },
@@ -310,7 +311,8 @@ const IMPORT_EXPORT_TYPES = {
         processType: row.process_type,
         nodeName: row.node_name,
         sequence: row.sequence,
-        scheduledAt: formatDateTime(row.scheduled_at),
+        startAt: formatDateTime(row.start_at || row.scheduled_at),
+        dueAt: formatDateTime(row.due_at),
         nodeDetail: row.node_detail || '',
         attachmentName: row.attachment_name || '',
         attachmentData: row.attachment_data || '',
@@ -327,7 +329,8 @@ const IMPORT_EXPORT_TYPES = {
         const nodeName = String(row.nodeName || '').trim();
         const sequence = Number(row.sequence);
         const nodeId = String(row.nodeId || '').trim();
-        const scheduledAt = normalizeDateTimeInput(row.scheduledAt);
+        const startAt = normalizeDateTimeInput(row.startAt || row.scheduledAt);
+        const dueAt = normalizeDateTimeInput(row.dueAt);
         const nodeDetail = String(row.nodeDetail || '').trim();
         const attachmentName = String(row.attachmentName || '').trim();
         const attachmentData = String(row.attachmentData || '');
@@ -356,16 +359,16 @@ const IMPORT_EXPORT_TYPES = {
             if (existing) {
               await db.query(
                 `UPDATE party_process_node
-                 SET process_type = $1, node_name = $2, sequence = $3, scheduled_at = $4, node_detail = $5, attachment_name = $6, attachment_data = $7, reminder_rule = $8
-                 WHERE node_id = $9`,
-                [processType, nodeName, sequence, scheduledAt, nodeDetail, attachmentName, attachmentData, row.reminderRule || '', existing.node_id]
+                 SET process_type = $1, node_name = $2, sequence = $3, scheduled_at = $4, start_at = $4, due_at = $5, node_detail = $6, attachment_name = $7, attachment_data = $8, reminder_rule = $9
+                 WHERE node_id = $10`,
+                [processType, nodeName, sequence, startAt, dueAt, nodeDetail, attachmentName, attachmentData, row.reminderRule || '', existing.node_id]
               );
               result.updated += 1;
             } else {
               await db.query(
-                `INSERT INTO party_process_node (node_id, process_type, node_name, sequence, scheduled_at, node_detail, attachment_name, attachment_data, reminder_rule)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-                [nodeId || `NODE-${Date.now()}-${index}`, processType, nodeName, sequence, scheduledAt, nodeDetail, attachmentName, attachmentData, row.reminderRule || '']
+                `INSERT INTO party_process_node (node_id, process_type, node_name, sequence, scheduled_at, start_at, due_at, node_detail, attachment_name, attachment_data, reminder_rule)
+                 VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8, $9, $10)`,
+                [nodeId || `NODE-${Date.now()}-${index}`, processType, nodeName, sequence, startAt, dueAt, nodeDetail, attachmentName, attachmentData, row.reminderRule || '']
               );
               result.created += 1;
             }

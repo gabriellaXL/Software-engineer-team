@@ -26,18 +26,40 @@ function normalizeProcessType(value) {
   return processType === 'league' ? 'league' : 'party';
 }
 
-function normalizeScheduledAt(value) {
+function normalizeNodeTime(value, errorMessage = '节点日期时间格式无效') {
   if (value === undefined || value === null) return null;
   const raw = String(value).trim();
   if (!raw) return null;
 
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) {
-    throw new Error('节点日期时间格式无效');
+    throw new Error(errorMessage);
   }
 
   const normalized = raw.replace('T', ' ');
   return normalized.length === 16 ? `${normalized}:00` : normalized;
+}
+
+function normalizeNodeRange({ startAt, dueAt, scheduledAt }) {
+  const normalizedStartAt = startAt !== undefined
+    ? normalizeNodeTime(startAt, '开始时间格式无效')
+    : (scheduledAt !== undefined ? normalizeNodeTime(scheduledAt, '节点日期时间格式无效') : null);
+  const normalizedDueAt = dueAt !== undefined
+    ? normalizeNodeTime(dueAt, '截止时间格式无效')
+    : null;
+
+  if (normalizedStartAt && normalizedDueAt) {
+    const startTime = new Date(normalizedStartAt).getTime();
+    const dueTime = new Date(normalizedDueAt).getTime();
+    if (dueTime < startTime) {
+      throw new Error('截止时间不能早于开始时间');
+    }
+  }
+
+  return {
+    normalizedStartAt,
+    normalizedDueAt
+  };
 }
 
 function normalizeReviewDecision(value) {
@@ -70,13 +92,16 @@ function mapSubmission(row) {
 }
 
 function mapNode(row) {
+  const startAt = row.start_at || row.scheduled_at || null;
   return {
     node_id: row.node_id,
     process_type: row.process_type,
     node_name: row.node_name,
     sequence: row.sequence,
     reminder_rule: row.reminder_rule || '',
-    scheduled_at: row.scheduled_at,
+    scheduled_at: startAt,
+    start_at: startAt,
+    due_at: row.due_at || null,
     node_detail: row.node_detail || '',
     attachment_name: row.attachment_name || '',
     attachment_data: row.attachment_data || ''
@@ -123,6 +148,8 @@ exports.createProcessNode = async (req, res) => {
     nodeName,
     sequence,
     reminderRule,
+    startAt,
+    dueAt,
     scheduledAt,
     nodeDetail,
     attachmentName,
@@ -135,12 +162,12 @@ exports.createProcessNode = async (req, res) => {
   try {
     await ensureCoreTables();
     const nodeId = `NODE-${Date.now()}`;
-    const normalizedScheduledAt = normalizeScheduledAt(scheduledAt);
+    const { normalizedStartAt, normalizedDueAt } = normalizeNodeRange({ startAt, dueAt, scheduledAt });
     const { rows } = await db.query(
       `INSERT INTO party_process_node (
-         node_id, process_type, node_name, sequence, reminder_rule, scheduled_at, node_detail, attachment_name, attachment_data
+         node_id, process_type, node_name, sequence, reminder_rule, scheduled_at, start_at, due_at, node_detail, attachment_name, attachment_data
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         nodeId,
@@ -148,7 +175,9 @@ exports.createProcessNode = async (req, res) => {
         String(nodeName).trim(),
         Number(sequence),
         String(reminderRule || '').trim(),
-        normalizedScheduledAt,
+        normalizedStartAt,
+        normalizedStartAt,
+        normalizedDueAt,
         String(nodeDetail || '').trim(),
         String(attachmentName || '').trim(),
         String(attachmentData || '')
@@ -156,7 +185,7 @@ exports.createProcessNode = async (req, res) => {
     );
     res.status(201).json(mapNode(rows[0]));
   } catch (err) {
-    if (err.message === '节点日期时间格式无效') {
+    if (['节点日期时间格式无效', '开始时间格式无效', '截止时间格式无效', '截止时间不能早于开始时间'].includes(err.message)) {
       return res.status(400).json({ error: err.message });
     }
     res.status(500).json({ error: err.message });
@@ -165,12 +194,13 @@ exports.createProcessNode = async (req, res) => {
 
 exports.updateProcessNode = async (req, res) => {
   const { nodeId } = req.params;
-  const { processType, nodeName, sequence, reminderRule, scheduledAt, nodeDetail, attachmentName, attachmentData } = req.body;
+  const { processType, nodeName, sequence, reminderRule, startAt, dueAt, scheduledAt, nodeDetail, attachmentName, attachmentData } = req.body;
 
   try {
     await ensureCoreTables();
-    const hasScheduledAt = scheduledAt !== undefined;
-    const normalizedScheduledAt = hasScheduledAt ? normalizeScheduledAt(scheduledAt) : null;
+    const hasStartAt = startAt !== undefined || scheduledAt !== undefined;
+    const hasDueAt = dueAt !== undefined;
+    const { normalizedStartAt, normalizedDueAt } = normalizeNodeRange({ startAt, dueAt, scheduledAt });
     const hasNodeDetail = nodeDetail !== undefined;
     const hasAttachmentName = attachmentName !== undefined;
     const hasAttachmentData = attachmentData !== undefined;
@@ -181,18 +211,22 @@ exports.updateProcessNode = async (req, res) => {
            sequence = COALESCE($3, sequence),
            reminder_rule = COALESCE($4, reminder_rule),
            scheduled_at = CASE WHEN $5 THEN $6 ELSE scheduled_at END,
-           node_detail = CASE WHEN $7 THEN $8 ELSE node_detail END,
-           attachment_name = CASE WHEN $9 THEN $10 ELSE attachment_name END,
-           attachment_data = CASE WHEN $11 THEN $12 ELSE attachment_data END
-       WHERE node_id = $13
+           start_at = CASE WHEN $5 THEN $6 ELSE start_at END,
+           due_at = CASE WHEN $7 THEN $8 ELSE due_at END,
+           node_detail = CASE WHEN $9 THEN $10 ELSE node_detail END,
+           attachment_name = CASE WHEN $11 THEN $12 ELSE attachment_name END,
+           attachment_data = CASE WHEN $13 THEN $14 ELSE attachment_data END
+       WHERE node_id = $15
        RETURNING *`,
       [
         processType ? normalizeProcessType(processType) : null,
         nodeName ? String(nodeName).trim() : null,
         Number.isFinite(Number(sequence)) ? Number(sequence) : null,
         reminderRule !== undefined ? String(reminderRule || '').trim() : null,
-        hasScheduledAt,
-        normalizedScheduledAt,
+        hasStartAt,
+        normalizedStartAt,
+        hasDueAt,
+        normalizedDueAt,
         hasNodeDetail,
         hasNodeDetail ? String(nodeDetail || '').trim() : null,
         hasAttachmentName,
@@ -205,7 +239,7 @@ exports.updateProcessNode = async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: '流程节点不存在' });
     res.json(mapNode(rows[0]));
   } catch (err) {
-    if (err.message === '节点日期时间格式无效') {
+    if (['节点日期时间格式无效', '开始时间格式无效', '截止时间格式无效', '截止时间不能早于开始时间'].includes(err.message)) {
       return res.status(400).json({ error: err.message });
     }
     res.status(500).json({ error: err.message });
@@ -402,6 +436,24 @@ exports.saveProcessSubmission = async (req, res) => {
     const resolvedStudentId = await resolveStudentId(req, studentId);
     if (!resolvedStudentId) {
       return res.status(404).json({ error: 'Student profile not found' });
+    }
+
+    const { rows: nodeRows } = await db.query(
+      'SELECT * FROM party_process_node WHERE node_id = $1',
+      [nodeId]
+    );
+    const node = nodeRows[0];
+    if (!node) {
+      return res.status(404).json({ error: '流程节点不存在' });
+    }
+    const now = Date.now();
+    const startTime = node.start_at || node.scheduled_at ? new Date(node.start_at || node.scheduled_at).getTime() : null;
+    const dueTime = node.due_at ? new Date(node.due_at).getTime() : null;
+    if (startTime && now < startTime) {
+      return res.status(400).json({ error: '当前未到该节点开始时间，暂不可提交' });
+    }
+    if (dueTime && now > dueTime) {
+      return res.status(400).json({ error: '当前已超过该节点截止时间，暂不可提交' });
     }
 
     client = await db.getClient();
