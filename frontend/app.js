@@ -37,8 +37,26 @@ const state = {
   editingPolicyId: null,
   processNodes: [],
   processRecords: [],
+  processDrafts: [],
+  processHistory: [],
+  studentProcessType: "party",
+  adminProcessType: "party",
   isProcessLoading: false,
   processError: "",
+  editingProcessDraftId: null,
+  editingProcessNodeId: null,
+  processDraftAttachment: null,
+  processNodeAttachment: null,
+  processReviews: [],
+  processReviewError: "",
+  processForm: {
+    nodeId: "",
+    materialType: "思想汇报",
+    customMaterialType: "",
+    description: "",
+    attachmentName: "",
+    attachmentData: ""
+  },
   transcriptId: null,
   transcriptTask: null,
   analysisResult: null,
@@ -71,6 +89,10 @@ const DEFAULT_NOTICE_TAGS = ["就业", "党团", "后勤", "毕业生", "奖助"
 const STUDENT_NOTICE_FILTER_TAGS = ["全部", ...DEFAULT_NOTICE_TAGS, "其它"];
 const NOTICE_DRAFT_STORAGE_KEY = "sds_notice_drafts";
 const GRADE_OPTIONS = ["大一", "大二", "大三", "大四"];
+const PROCESS_TYPE_OPTIONS = [
+  { value: "party", label: "入党流程" },
+  { value: "league", label: "入团流程" }
+];
 
 const params = new URLSearchParams(window.location.search);
 if (params.get("role") === "admin") {
@@ -142,13 +164,6 @@ const fallbackPolicies = [
     updated: "2026-04-30",
     attachment: "宿舍问题登记表"
   }
-];
-
-const processNodes = [
-  { name: "申请递交", status: "done", date: "2026-03-12", detail: "申请表与个人陈述已归档" },
-  { name: "谈话完成", status: "done", date: "2026-04-02", detail: "培养联系人谈话记录已确认" },
-  { name: "培养考察", status: "active", date: "截止 2026-05-18", detail: "本周五前提交思想汇报" },
-  { name: "支部讨论", status: "next", date: "待激活", detail: "当前节点完成后自动推进" }
 ];
 
 const notices = [
@@ -239,6 +254,8 @@ function clearSessionState() {
   removeSessionItem('sds_role');
   removeSessionItem('sds_student_view');
   removeSessionItem('sds_admin_view');
+  removeSessionItem('sds_student_process_type');
+  removeSessionItem('sds_admin_process_type');
   removeSessionItem('sds_last_transcript_id');
 }
 
@@ -246,6 +263,8 @@ function saveCurrentView() {
   setSessionItem('sds_role', state.role || '');
   setSessionItem('sds_student_view', state.studentView || 'home');
   setSessionItem('sds_admin_view', state.adminView || 'dashboard');
+  setSessionItem('sds_student_process_type', state.studentProcessType || 'party');
+  setSessionItem('sds_admin_process_type', state.adminProcessType || 'party');
 }
 
 function normalizePolicy(item = {}) {
@@ -313,12 +332,138 @@ function formatProcessDate(value, fallback = "待激活") {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
-  return date.toISOString().slice(0, 10);
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).replace(/\//g, "-");
+}
+
+function formatDateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).replace(" ", "T").slice(0, 16);
+
+  const pad = (num) => String(num).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function resetProcessForm() {
+  const processType = getStudentProcessType();
+  state.editingProcessDraftId = null;
+  state.processDraftAttachment = null;
+  state.processForm = {
+    nodeId: "",
+    materialType: processType === "league" ? "入团申请书" : "思想汇报",
+    customMaterialType: "",
+    description: "",
+    attachmentName: "",
+    attachmentData: ""
+  };
+}
+
+function normalizeProcessType(value) {
+  return value === "league" ? "league" : "party";
+}
+
+function getStudentProcessType() {
+  return normalizeProcessType(state.studentProcessType);
+}
+
+function getAdminProcessType() {
+  return normalizeProcessType(state.adminProcessType);
+}
+
+function getProcessTypeLabel(value) {
+  const normalized = normalizeProcessType(value);
+  return normalized === "league" ? "入团流程" : "入党流程";
+}
+
+function getProcessBaseMaterialOptions(processType) {
+  return normalizeProcessType(processType) === "league"
+    ? ["入团申请书", "团课心得", "支部推荐意见"]
+    : ["思想汇报", "谈话记录", "培养联系人意见"];
+}
+
+function getProcessMaterialOptions(processType) {
+  return [...getProcessBaseMaterialOptions(processType), "其他"];
+}
+
+function isCustomProcessMaterial(value, processType) {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue || normalizedValue === "其他") return false;
+  return !getProcessBaseMaterialOptions(processType).includes(normalizedValue);
+}
+
+function getProcessSubmissionStatusMeta(status) {
+  return String(status || "").toLowerCase() === "rejected"
+    ? { label: "待补充", tone: "danger" }
+    : { label: "草稿", tone: "neutral" };
+}
+
+function getCurrentProcessNode() {
+  const timeline = getProcessTimeline();
+  return timeline.find((item) => item.status === "active") || timeline.find((item) => item.status === "next") || null;
+}
+
+function getCurrentProcessStageText() {
+  const currentNode = getCurrentProcessNode();
+  return currentNode ? `${getProcessTypeLabel(getStudentProcessType())} / ${currentNode.name}` : `${getProcessTypeLabel(getStudentProcessType())} / 暂无流程节点`;
+}
+
+function getProcessPendingCount() {
+  const activeCount = getProcessTimeline().filter((item) => item.status === "active").length;
+  const pendingDraftCount = Array.isArray(state.processDrafts) ? state.processDrafts.length : 0;
+  return activeCount + pendingDraftCount;
+}
+
+function getUnreadNoticeCount() {
+  return getNoticeRows().filter((item) => item.unread).length;
+}
+
+function getProcessFormState() {
+  const currentNode = getCurrentProcessNode();
+  const processType = getStudentProcessType();
+  const defaultMaterialType = getProcessBaseMaterialOptions(processType)[0];
+  const savedMaterialType = state.processForm?.materialType || defaultMaterialType;
+  const customMaterialType = isCustomProcessMaterial(savedMaterialType, processType)
+    ? savedMaterialType
+    : (state.processForm?.customMaterialType || "");
+  return {
+    nodeId: state.processForm?.nodeId || currentNode?.id || "",
+    materialType: savedMaterialType,
+    materialTypeSelection: customMaterialType ? "其他" : savedMaterialType,
+    customMaterialType,
+    description: state.processForm?.description || "",
+    attachmentName: state.processForm?.attachmentName || "",
+    attachmentData: state.processForm?.attachmentData || ""
+  };
+}
+
+function loadProcessDraftToForm(draft) {
+  if (!draft) return;
+  const processType = getStudentProcessType();
+  const materialType = draft.materialType || getProcessBaseMaterialOptions(processType)[0];
+  state.editingProcessDraftId = draft.submissionId || "";
+  state.processForm = {
+    nodeId: draft.nodeId || "",
+    materialType,
+    customMaterialType: isCustomProcessMaterial(materialType, processType) ? materialType : "",
+    description: draft.description || "",
+    attachmentName: draft.attachmentName || "",
+    attachmentData: draft.attachmentData || ""
+  };
+  state.processDraftAttachment = draft.attachmentData
+    ? { name: draft.attachmentName || "流程草稿附件", data: draft.attachmentData }
+    : null;
 }
 
 
 function getProcessTimeline() {
-  if (!state.processNodes.length) return processNodes;
+  if (!state.processNodes.length) return [];
 
   const recordByNodeId = new Map(state.processRecords.map((record) => [record.node_id, record]));
   let hasActive = false;
@@ -331,21 +476,30 @@ function getProcessTimeline() {
       status = "active";
       hasActive = true;
     }
+    const scheduledText = node.scheduled_at ? formatProcessDate(node.scheduled_at, "") : "";
+    const completedText = record?.completed_time ? formatProcessDate(record.completed_time, "") : "";
+    const detailParts = [];
+    if (scheduledText) detailParts.push(`节点时间：${scheduledText}`);
+    if (status === "done" && completedText) detailParts.push(`完成时间：${completedText}`);
+    if (node.reminder_rule || record?.comment) detailParts.push(node.reminder_rule || record?.comment);
     return {
       id: node.node_id,
       name: node.node_name || node.name || "未命名节点",
       status,
-      date: status === "done" ? formatProcessDate(record?.completed_time) : (status === "active" ? "进行中" : "待激活"),
-      detail: node.reminder_rule || record?.comment || "请按流程要求完成当前节点。"
+      date: scheduledText || (status === "done" ? formatProcessDate(record?.completed_time) : (status === "active" ? "进行中" : "待激活")),
+      detail: detailParts.join(" · ") || "请按流程要求完成当前节点。"
     };
   });
 }
 
 async function fetchProcessData(options = {}) {
   const canViewProcess = state.role === "student" || state.role === "student_leader";
+  const processType = normalizeProcessType(options.processType || state.studentProcessType);
   if (!state.token || !canViewProcess) {
     state.processNodes = [];
     state.processRecords = [];
+    state.processDrafts = [];
+    state.processHistory = [];
     state.processError = "";
     return getProcessTimeline();
   }
@@ -355,19 +509,38 @@ async function fetchProcessData(options = {}) {
   if (options.renderBefore) render();
 
   try {
-    const [nodesResponse, progressResponse] = await Promise.all([
-      fetch(`${API_BASE_URL}/process/nodes?processType=party`, { headers: apiHeaders() }),
-      fetch(`${API_BASE_URL}/process/progress`, { headers: apiHeaders() })
+    const [nodesResponse, progressResponse, draftsResponse, rejectedResponse, historyResponse] = await Promise.all([
+      fetch(`${API_BASE_URL}/process/nodes?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/process/progress?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/process/submissions?status=draft&processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/process/submissions?status=rejected&processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() }),
+      fetch(`${API_BASE_URL}/process/history?processType=${encodeURIComponent(processType)}`, { headers: apiHeaders() })
     ]);
     const nodes = await nodesResponse.json();
     const progress = await progressResponse.json();
+    const drafts = await draftsResponse.json();
+    const rejected = await rejectedResponse.json();
+    const history = await historyResponse.json();
     if (!nodesResponse.ok) throw new Error(nodes.error || "流程节点获取失败");
     if (!progressResponse.ok) throw new Error(progress.error || "学生进度获取失败");
+    if (!draftsResponse.ok) throw new Error(drafts.error || "流程草稿获取失败");
+    if (!rejectedResponse.ok) throw new Error(rejected.error || "流程退回记录获取失败");
+    if (!historyResponse.ok) throw new Error(history.error || "流程历史获取失败");
+    const editableSubmissions = [...(Array.isArray(drafts) ? drafts : []), ...(Array.isArray(rejected) ? rejected : [])]
+      .sort((left, right) => {
+        const leftTime = new Date(left.updatedAt || left.createdAt || 0).getTime();
+        const rightTime = new Date(right.updatedAt || right.createdAt || 0).getTime();
+        return rightTime - leftTime;
+      });
     state.processNodes = Array.isArray(nodes) ? nodes : [];
     state.processRecords = Array.isArray(progress) ? progress : [];
+    state.processDrafts = editableSubmissions;
+    state.processHistory = Array.isArray(history) ? history : [];
     return getProcessTimeline();
   } catch (error) {
     state.processError = error.message;
+    state.processDrafts = [];
+    state.processHistory = [];
     if (!options.silent) showToast(`流程接口异常：${error.message}`);
     return getProcessTimeline();
   } finally {
@@ -511,9 +684,10 @@ async function fetchAdminProcessNodes(options = {}) {
   if (!state.token || state.role === "student" || state.role === "student_leader") {
     return [];
   }
+  const processType = normalizeProcessType(options.processType || state.adminProcessType);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/process/nodes?processType=party`, {
+    const response = await fetch(`${API_BASE_URL}/process/nodes?processType=${encodeURIComponent(processType)}`, {
       headers: apiHeaders()
     });
     const data = await response.json();
@@ -524,6 +698,57 @@ async function fetchAdminProcessNodes(options = {}) {
     if (!options.silent) showToast(`流程节点接口异常：${error.message}`);
     return state.processNodes || [];
   }
+}
+
+async function fetchProcessReviews(options = {}) {
+  if (!state.token || state.role === "student" || state.role === "student_leader") {
+    state.processReviews = [];
+    state.processReviewError = "";
+    return [];
+  }
+  const processType = normalizeProcessType(options.processType || state.adminProcessType);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/process/submissions?status=pending&processType=${encodeURIComponent(processType)}`, {
+      headers: apiHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "流程待审数据获取失败");
+    state.processReviews = Array.isArray(data) ? data : [];
+    state.processReviewError = "";
+    return state.processReviews;
+  } catch (error) {
+    state.processReviews = [];
+    state.processReviewError = error.message;
+    if (!options.silent) showToast(`流程审核接口异常：${error.message}`);
+    return [];
+  }
+}
+
+async function saveProcessNode(payload) {
+  const isEditing = Boolean(state.editingProcessNodeId);
+  const url = isEditing
+    ? `${API_BASE_URL}/process/nodes/${encodeURIComponent(state.editingProcessNodeId)}`
+    : `${API_BASE_URL}/process/nodes`;
+  const method = isEditing ? "PUT" : "POST";
+  const response = await fetch(url, {
+    method,
+    headers: apiHeaders(true),
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "流程节点保存失败");
+  return data;
+}
+
+async function deleteProcessNode(nodeId) {
+  const response = await fetch(`${API_BASE_URL}/process/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "DELETE",
+    headers: apiHeaders()
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "流程节点删除失败");
+  return data;
 }
 
 function fallbackUserRecords() {
@@ -1367,9 +1592,10 @@ function renderSidebar(kind) {
   const profileName = state.userProfile?.name || "未知用户";
   const profileId = state.userProfile?.student_no || state.userProfile?.admin_id || "未知编号";
   const profileDesc = kind === "student" ? "普通学生" : (state.userProfile?.role || "管理老师");
+  const currentStageText = getCurrentProcessStageText();
 
   const profile = kind === "student"
-    ? [profileDesc, profileName + " / " + profileId, "当前阶段：培养考察"]
+    ? [profileDesc, profileName + " / " + profileId, `当前阶段：${currentStageText}`]
     : [profileDesc, profileName, "系统管理员"];
   
   return `
@@ -1426,15 +1652,23 @@ function renderStudentHome() {
   const noticeRows = getNoticeRows();
   const userName = getCurrentUserName();
   const applicationCount = Array.isArray(state.applications) ? state.applications.length : 0;
+  const unreadNoticeCount = getUnreadNoticeCount();
+  const processTimeline = getProcessTimeline();
+  const completedProcessCount = processTimeline.filter((item) => item.status === "done").length;
+  const processSummary = processTimeline.length
+    ? `${completedProcessCount}/${processTimeline.length}`
+    : "0/0";
+  const currentStageText = getCurrentProcessStageText();
+  const processReminder = getCurrentProcessNode();
   return `
-    ${pageHead(`上午好，${escapeHtml(userName)}`, "待办 2 项 · 未读通知 2 条 · 当前党团阶段：入党积极分子培养", [
+    ${pageHead(`上午好，${escapeHtml(userName)}`, `待办 ${getProcessPendingCount()} 项 · 未读通知 ${unreadNoticeCount} 条 · 当前党团阶段：${escapeHtml(currentStageText)}`, [
       ["quick-search", "检索政策", "search", "ghost-button"],
       ["student-new-application", "提交申请", "plus", "primary-button"]
     ])}
     <section class="grid four">
-      ${metric("待办提醒", "2", "思想汇报、证明材料", "amber")}
-      ${metric("未读通知", "2", "按就业、党团标签推送", "brand")}
-      ${metric("流程进度", "3/4", "培养考察进行中", "green")}
+      ${metric("待办提醒", String(getProcessPendingCount()), processReminder ? `${processReminder.name}待处理` : "暂无待办", "amber")}
+      ${metric("未读通知", String(unreadNoticeCount), "按标签和年级筛选推送", "brand")}
+      ${metric("流程进度", processSummary, processReminder ? `${processReminder.name}进行中` : "等待管理员配置流程", "green")}
       ${metric("证明记录", String(applicationCount), "近一年审批留痕", "teal")}
     </section>
     <section class="grid four" style="margin-top:14px">
@@ -1463,7 +1697,10 @@ function renderStudentHome() {
           </div>
         </div>
         <div class="reminder-list">
-          ${reminder("思想汇报待提交", "截止 2026-05-18，请上传本阶段思想汇报附件。", "warning")}
+          ${processReminder
+            ? reminder(`${processReminder.name}待处理`, processReminder.detail || "请按流程要求提交当前阶段材料。", "warning")
+            : reminder("暂无党团待办", "当前没有激活中的党团流程节点。", "success")
+          }
           ${reminder("证明申请需补充材料", "在读证明申请缺少用途说明，可在申请记录中补交。", "danger")}
           ${reminder("成绩分析建议更新", "本学期课程信息已变化，建议重新上传成绩单。", "success")}
         </div>
@@ -1568,17 +1805,35 @@ function renderConsult() {
 }
 
 function renderProcess() {
+  const currentNode = getCurrentProcessNode();
+  const formState = getProcessFormState();
+  const historyRows = Array.isArray(state.processHistory) ? state.processHistory : [];
+  const draftRows = Array.isArray(state.processDrafts) ? state.processDrafts : [];
+  const currentProcessType = getStudentProcessType();
+  const materialOptions = getProcessMaterialOptions(currentProcessType);
   return `
     ${pageHead("党团流程", "线性展示入党/入团全过程，支持节点提醒、材料提交和审批退回处理。", [
       ["submit-material", "提交材料", "upload", "primary-button"]
     ])}
+    <section class="panel">
+      <div class="chip-row">
+        ${PROCESS_TYPE_OPTIONS.map((item) => `
+          <button
+            type="button"
+            class="chip ${currentProcessType === item.value ? "is-active" : ""}"
+            data-action="switch-student-process-type"
+            data-type="${item.value}"
+          >${item.label}</button>
+        `).join("")}
+      </div>
+    </section>
     <section class="grid two">
       <div class="panel">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">入党积极分子培养</p>
+            <p class="eyebrow">${escapeHtml(getProcessTypeLabel(currentProcessType))}</p>
             <h2>节点状态</h2>
-            <p>当前处于培养考察，系统已为下一节点保留支部讨论待办。</p>
+            <p>${escapeHtml(currentNode ? `当前激活节点：${currentNode.name}` : "管理员尚未配置党团流程节点。")}</p>
           </div>
         </div>
         ${renderTimeline()}
@@ -1587,46 +1842,97 @@ function renderProcess() {
         <div class="panel-head">
           <div>
             <p class="eyebrow">节点操作</p>
-            <h2>培养考察材料</h2>
-            <p>上传后进入管理员待审核，退回时可补充后再次提交。</p>
+            <h2>${escapeHtml(currentNode ? `${currentNode.name}材料` : "流程材料")}</h2>
+            <p>${escapeHtml(`当前查看：${getProcessTypeLabel(currentProcessType)}。保存草稿后可稍后继续编辑；正式提交后会进入管理员待审核队列。`)}</p>
           </div>
         </div>
         <form class="form-grid" data-form="process">
           <label class="field full">
-            <span>材料类型</span>
-            <select required>
-              <option>思想汇报</option>
-              <option>谈话记录</option>
-              <option>培养联系人意见</option>
+            <span>所属节点</span>
+            <select name="nodeId" required>
+              ${state.processNodes.map((node) => `<option value="${escapeHtml(node.node_id)}" ${String(formState.nodeId) === String(node.node_id) ? "selected" : ""}>${escapeHtml(node.node_name)}${node.scheduled_at ? `（${escapeHtml(formatProcessDate(node.scheduled_at, ""))}）` : ""}</option>`).join("")}
             </select>
           </label>
           <label class="field full">
+            <span>材料类型</span>
+            <select name="materialType" required>
+              ${materialOptions.map((item) => `<option ${formState.materialTypeSelection === item ? "selected" : ""}>${item}</option>`).join("")}
+            </select>
+          </label>
+          ${formState.materialTypeSelection === "其他" ? `
+            <label class="field full">
+              <span>其它材料名称</span>
+              <input name="customMaterialType" type="text" placeholder="请输入实际提交的材料名称" value="${escapeHtml(formState.customMaterialType)}" required />
+            </label>
+          ` : ""}
+          <label class="field full">
             <span>说明</span>
-            <textarea placeholder="补充本次提交说明"></textarea>
+            <textarea name="description" placeholder="补充本次提交说明">${escapeHtml(formState.description)}</textarea>
           </label>
           <label class="field full">
             <span>附件</span>
-            <input type="file" />
+            <input name="attachment" type="file" />
+            <small id="processAttachmentHint" style="color:#64748b;">${escapeHtml(state.processDraftAttachment?.name ? `当前已缓存附件：${state.processDraftAttachment.name}` : "支持上传思想汇报、谈话记录等附件。")}</small>
           </label>
           <div class="toolbar field full">
             <button type="submit" class="primary-button">${icon("upload")}提交审核</button>
-            <button type="button" class="ghost-button" data-action="save-draft">${icon("file")}保存草稿</button>
+            <button type="button" class="ghost-button" data-action="save-process-draft">${icon("file")}保存草稿</button>
+            ${(state.editingProcessDraftId || state.processDraftAttachment) ? `<button type="button" class="ghost-button" data-action="reset-process-form">${icon("x")}清空表单</button>` : ""}
           </div>
         </form>
       </div>
     </section>
-    <section class="panel" style="margin-top:14px">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">历史记录</p>
-          <h2>审批与操作日志</h2>
+    <section class="grid two" style="margin-top:14px">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">待处理材料</p>
+            <h2>草稿与退回补充</h2>
+          </div>
+          <span class="badge neutral">${draftRows.length} 条</span>
+        </div>
+        <div class="result-list">
+          ${draftRows.length ? draftRows.map((draft) => `
+            ${(() => {
+              const statusMeta = getProcessSubmissionStatusMeta(draft.status);
+              return `
+            <article class="list-card">
+              <header>
+                <h3>${escapeHtml(draft.materialType || "未命名草稿")}</h3>
+                ${badge(statusMeta.label, statusMeta.tone)}
+              </header>
+              <p>${escapeHtml(draft.nodeName || "未绑定节点")} · ${escapeHtml(draft.description || "暂无补充说明")}</p>
+              ${draft.reviewComment ? `<p style="color:#b91c1c;">审批意见：${escapeHtml(draft.reviewComment)}</p>` : ""}
+              <div class="list-meta">
+                <span>${escapeHtml(formatProcessDate(draft.updatedAt, "未更新时间"))}</span>
+                ${draft.attachmentName ? `<span>附件：${escapeHtml(draft.attachmentName)}</span>` : ""}
+              </div>
+              <div class="toolbar" style="margin-top:12px;">
+                <button type="button" class="secondary-button" data-action="load-process-draft" data-id="${escapeHtml(draft.submissionId)}">${icon("file")}${statusMeta.label === "待补充" ? "修改并重提" : "继续编辑"}</button>
+                ${String(draft.status || "").toLowerCase() === "draft" ? `<button type="button" class="ghost-button" data-action="delete-process-draft" data-id="${escapeHtml(draft.submissionId)}">${icon("x")}删除</button>` : ""}
+              </div>
+            </article>
+          `;
+            })()}
+          `).join("") : `<article class="list-card"><h3>暂无待处理材料</h3><p>当前没有草稿或待补充的党团材料。</p></article>`}
         </div>
       </div>
-      ${table(["时间", "节点", "操作", "处理人", "结果"], [
-        ["2026-04-02 15:10", "谈话完成", "材料审核", "党建管理员", badge("通过", "success")],
-        ["2026-03-12 09:20", "申请递交", "学生提交", "张同学", badge("已归档", "neutral")],
-        ["2026-03-10 11:30", "申请递交", "系统提醒", "系统", badge("已送达", "success")]
-      ])}
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">历史记录</p>
+            <h2>审批与操作日志</h2>
+          </div>
+          <span class="badge neutral">${historyRows.length} 条</span>
+        </div>
+        ${historyRows.length ? table(["时间", "节点", "操作", "处理人", "结果"], historyRows.map((item) => [
+          escapeHtml(formatProcessDate(item.time, "未记录")),
+          escapeHtml(item.nodeName || "未命名节点"),
+          escapeHtml(item.action || ""),
+          escapeHtml(item.actor || ""),
+          badge(escapeHtml(item.result || "已记录"), item.resultTone || "neutral")
+        ])) : `<article class="list-card"><h3>暂无历史记录</h3><p>当前还没有党团流程提交或节点推进记录。</p></article>`}
+      </div>
     </section>
   `;
 }
@@ -2269,28 +2575,102 @@ function renderNoticeManage() {
 }
 
 function renderProcessConfig() {
+  const editingNode = (state.processNodes || []).find((item) => String(item.node_id) === String(state.editingProcessNodeId));
+  const currentProcessType = getAdminProcessType();
+  const processReviewRows = Array.isArray(state.processReviews) ? state.processReviews : [];
   return `
     ${pageHead("流程配置", "配置党团培养阶段、提醒规则、逾期策略和审批节点。", [
       ["add-node", "新增节点", "plus", "primary-button"]
     ])}
+    <section class="panel">
+      <div class="chip-row">
+        ${PROCESS_TYPE_OPTIONS.map((item) => `
+          <button
+            type="button"
+            class="chip ${currentProcessType === item.value ? "is-active" : ""}"
+            data-action="switch-admin-process-type"
+            data-type="${item.value}"
+          >${item.label}</button>
+        `).join("")}
+      </div>
+    </section>
     <section class="grid two">
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">节点列表</p><h2>入党流程</h2></div></div>
-        ${table(["顺序", "节点名称", "触发规则", "提醒", "状态"], [
-          ["1", "申请递交", "学生主动提交", "提交后 1 天", badge("启用", "success")],
-          ["2", "谈话完成", "上一节点通过", "截止前 3 天", badge("启用", "success")],
-          ["3", "培养考察", "管理员激活", "每 7 天", badge("启用", "success")],
-          ["4", "支部讨论", "材料审核通过", "截止前 2 天", badge("草稿", "neutral")]
-        ])}
+        <div class="panel-head"><div><p class="eyebrow">节点列表</p><h2>${escapeHtml(getProcessTypeLabel(currentProcessType))}</h2></div></div>
+        ${state.processNodes.length ? table(["顺序", "节点名称", "流程类型", "节点时间", "提醒规则", "操作"], state.processNodes.map((node) => [
+          escapeHtml(String(node.sequence || "")),
+          escapeHtml(node.node_name || ""),
+          escapeHtml(getProcessTypeLabel(node.process_type || "party")),
+          escapeHtml(formatProcessDate(node.scheduled_at, "未设置")),
+          escapeHtml(node.reminder_rule || "未配置"),
+          `<div class="toolbar"><button type="button" class="ghost-button" data-action="process-node-edit" data-id="${escapeHtml(node.node_id)}">编辑</button><button type="button" class="ghost-button" data-action="process-node-delete" data-id="${escapeHtml(node.node_id)}">删除</button></div>`
+        ])) : `<article class="list-card"><h3>暂无流程节点</h3><p>请先在右侧创建党团流程节点。</p></article>`}
       </div>
       <div class="panel">
-        <div class="panel-head"><div><p class="eyebrow">规则编辑</p><h2>节点参数</h2></div></div>
-        <form class="form-grid" data-form="admin">
-          ${field("节点名称", "input", "培养考察")}
-          ${field("截止天数", "input", "30")}
-          ${field("提醒规则", "textarea", "节点激活后每 7 天提醒；截止前 3 天加急提醒。", true)}
-          <div class="toolbar field full"><button class="primary-button" type="submit">${icon("check")}保存规则</button></div>
+        <div class="panel-head"><div><p class="eyebrow">${editingNode ? "规则编辑" : "新增节点"}</p><h2>节点参数</h2></div></div>
+        <form class="form-grid" data-form="process-node">
+          <label class="field">
+            <span>流程类型</span>
+            <select name="processType" required>
+              ${PROCESS_TYPE_OPTIONS.map((item) => `<option value="${item.value}" ${(editingNode?.process_type || currentProcessType) === item.value ? "selected" : ""}>${item.label}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field">
+            <span>顺序</span>
+            <input name="sequence" type="number" min="1" value="${escapeHtml(String(editingNode?.sequence || (state.processNodes.length + 1)))}" required />
+          </label>
+          <label class="field full">
+            <span>节点名称</span>
+            <input name="nodeName" type="text" placeholder="如：培养考察" value="${escapeHtml(editingNode?.node_name || "")}" required />
+          </label>
+          <label class="field full">
+            <span>详细说明</span>
+            <textarea name="nodeDetail" placeholder="补充该节点的流程要求、所需材料、注意事项等。">${escapeHtml(editingNode?.node_detail || "")}</textarea>
+          </label>
+          <label class="field full">
+            <span>节点时间</span>
+            <input name="scheduledAt" type="datetime-local" value="${escapeHtml(formatDateTimeLocalValue(editingNode?.scheduled_at))}" />
+          </label>
+          <label class="field full">
+            <span>提醒规则</span>
+            <textarea name="reminderRule" placeholder="例如：节点激活后每 7 天提醒一次。">${escapeHtml(editingNode?.reminder_rule || "")}</textarea>
+          </label>
+          <label class="field full">
+            <span>节点附件</span>
+            <input name="attachment" type="file" />
+            <small id="processNodeAttachmentHint" style="color:#64748b;">${escapeHtml(state.processNodeAttachment?.name ? `当前已缓存附件：${state.processNodeAttachment.name}` : "支持上传该节点的说明文档、模板附件，学生端详情可下载。")}</small>
+          </label>
+          <div class="toolbar field full">
+            ${editingNode ? `<button class="ghost-button" type="button" data-action="process-node-reset">取消编辑</button>` : ""}
+            <button class="primary-button" type="submit">${icon("check")}${editingNode ? "保存节点" : "创建节点"}</button>
+          </div>
         </form>
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div><p class="eyebrow">流程审核</p><h2>${escapeHtml(getProcessTypeLabel(currentProcessType))}待审材料</h2></div>
+        <span class="badge neutral">${processReviewRows.length} 条</span>
+      </div>
+      <div class="notice-list">
+        ${processReviewRows.length ? processReviewRows.map((item) => `
+          <article class="list-card">
+            <header>
+              <h3>${escapeHtml(item.materialType || "流程材料")}</h3>
+              ${badge("待审核", "warning")}
+            </header>
+            <p>${escapeHtml(item.studentName || item.studentId || "未知学生")} · ${escapeHtml(item.nodeName || "未绑定节点")}</p>
+            <p>${escapeHtml(item.description || "暂无提交说明")}</p>
+            <div class="list-meta">
+              <span>${escapeHtml(formatProcessDate(item.submittedAt || item.updatedAt || item.createdAt, "未提交"))}</span>
+              ${item.attachmentName ? `<span>附件：${escapeHtml(item.attachmentName)}</span>` : ""}
+            </div>
+            <div class="toolbar" style="margin-top:12px;">
+              <button type="button" class="secondary-button" data-action="review-process-submission" data-id="${escapeHtml(item.submissionId)}">${icon("shield")}审核</button>
+              ${item.attachmentData ? `<button type="button" class="ghost-button" data-action="download-process-submission-attachment" data-id="${escapeHtml(item.submissionId)}">${icon("download")}下载附件</button>` : ""}
+            </div>
+          </article>
+        `).join("") : `<article class="list-card"><h3>暂无待审核材料</h3><p>${escapeHtml(state.processReviewError ? `流程审核接口异常：${state.processReviewError}` : "学生提交后会在这里进入审核队列。")}</p></article>`}
       </div>
     </section>
   `;
@@ -2303,7 +2683,7 @@ function renderApprovalManage() {
   
   // list view
   return `
-    ${pageHead("审批管理", "集中处理申请单，支持通过、退回补充与操作日志审计。", [
+    ${pageHead("审批管理", "集中处理证明申请与党团流程材料，支持通过、退回补充与操作留痕。", [
     ])}
     <section class="panel" style="margin-top:14px">
       <div class="panel-head">
@@ -2323,6 +2703,30 @@ function renderApprovalManage() {
             </div>
           </article>
         `).join("") : '<p style="color:#94a3b8; padding: 20px;">暂无申请记录</p>'}
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div><p class="eyebrow">流程材料</p><h2>党团流程待审核</h2></div>
+      </div>
+      <div class="notice-list">
+        ${state.processReviews && state.processReviews.length > 0 ? state.processReviews.map((item) => `
+          <article class="list-card">
+            <header>
+              <h3>${escapeHtml(item.materialType || "流程材料")}</h3>
+              ${badge("待审核", "warning")}
+            </header>
+            <p>${escapeHtml(item.studentName || item.studentId || "未知学生")} · ${escapeHtml(item.nodeName || "未绑定节点")}</p>
+            <p>${escapeHtml(item.description || "暂无提交说明")}</p>
+            <div class="list-meta">
+              <span>${escapeHtml(formatProcessDate(item.submittedAt || item.updatedAt || item.createdAt, "未提交"))}</span>
+              ${item.attachmentName ? `<span>附件：${escapeHtml(item.attachmentName)}</span>` : ""}
+            </div>
+            <div class="toolbar">
+              <button type="button" class="secondary-button" data-action="review-process-submission" data-id="${escapeHtml(item.submissionId)}">${icon("file")}查看详情</button>
+            </div>
+          </article>
+        `).join("") : '<p style="color:#94a3b8; padding: 20px;">暂无党团流程待审核材料</p>'}
       </div>
     </section>
   `;
@@ -2366,6 +2770,146 @@ window.dataURLtoBlobURL = function(dataUrl) {
   }
   const blob = new Blob([u8arr], {type: mime});
   return URL.createObjectURL(blob);
+};
+
+function downloadDataUrl(dataUrl, fileName) {
+  if (!dataUrl) {
+    showToast("附件不存在");
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = fileName || "attachment";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function renderProcessNodeDetailModal(node) {
+  return `
+    <div class="modal" id="processNodeDetailModal" style="display:flex;">
+      <div class="modal-panel" style="width: 560px;">
+        <div class="modal-head">
+          <div><p class="eyebrow">节点详情</p><h2>${escapeHtml(node.node_name || "未命名节点")}</h2></div>
+          <button type="button" class="icon-button" data-action="close-process-node-modal">${icon("x")}</button>
+        </div>
+        <div class="stack">
+          <p><strong>流程类型：</strong>${escapeHtml(getProcessTypeLabel(node.process_type || "party"))}</p>
+          <p><strong>顺序：</strong>${escapeHtml(String(node.sequence || "-"))}</p>
+          <p><strong>节点时间：</strong>${escapeHtml(formatProcessDate(node.scheduled_at, "未设置"))}</p>
+          <p><strong>提醒规则：</strong>${escapeHtml(node.reminder_rule || "未设置")}</p>
+          <p style="margin-top: 12px;"><strong>详细说明：</strong></p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;white-space:pre-wrap;">${escapeHtml(node.node_detail || "管理员暂未补充详细说明。")}</div>
+          ${node.attachment_name ? `
+            <div style="margin-top: 14px;">
+              <strong>节点附件：</strong>
+              ${node.attachment_data
+                ? `<button type="button" class="secondary-button" data-action="download-process-node-attachment" data-id="${escapeHtml(node.node_id)}">${icon("download")}下载 ${escapeHtml(node.attachment_name)}</button>`
+                : `<span style="color:#64748b;">${escapeHtml(node.attachment_name)}</span>`
+              }
+            </div>
+          ` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openProcessNodeDetail(nodeId) {
+  const node = (state.processNodes || []).find((item) => String(item.node_id) === String(nodeId));
+  if (!node) {
+    showToast("节点不存在");
+    return;
+  }
+  document.getElementById("processNodeDetailModal")?.remove();
+  document.body.insertAdjacentHTML("beforeend", renderProcessNodeDetailModal(node));
+}
+
+function downloadProcessNodeAttachment(nodeId) {
+  const node = (state.processNodes || []).find((item) => String(item.node_id) === String(nodeId));
+  if (!node?.attachment_data) {
+    showToast("该节点暂无附件");
+    return;
+  }
+  downloadDataUrl(node.attachment_data, node.attachment_name || `node-${nodeId}-attachment`);
+}
+
+function renderProcessReviewModal(submission) {
+  return `
+    <div class="modal" id="processReviewModal" style="display:flex;">
+      <div class="modal-panel" style="width: 620px;">
+        <div class="modal-head">
+          <div><p class="eyebrow">流程审核</p><h2>${escapeHtml(submission.materialType || "流程材料")}</h2></div>
+          <button type="button" class="icon-button" data-action="close-process-review-modal">${icon("x")}</button>
+        </div>
+        <div class="stack">
+          <p><strong>学生：</strong>${escapeHtml(submission.studentName || submission.studentId || "未知学生")}${submission.studentNo ? `（${escapeHtml(submission.studentNo)}）` : ""}</p>
+          <p><strong>节点：</strong>${escapeHtml(submission.nodeName || "未命名节点")}</p>
+          <p><strong>提交流程：</strong>${escapeHtml(getProcessTypeLabel(submission.processType || state.adminProcessType))}</p>
+          <p><strong>提交时间：</strong>${escapeHtml(formatProcessDate(submission.submittedAt || submission.updatedAt || submission.createdAt, "未提交"))}</p>
+          <p style="margin-top: 12px;"><strong>提交说明：</strong></p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;white-space:pre-wrap;">${escapeHtml(submission.description || "暂无提交说明")}</div>
+          ${submission.attachmentName ? `
+            <div style="margin-top: 14px;">
+              <strong>学生附件：</strong>
+              ${submission.attachmentData
+                ? `<button type="button" class="secondary-button" data-action="download-process-submission-attachment" data-id="${escapeHtml(submission.submissionId)}">${icon("download")}下载 ${escapeHtml(submission.attachmentName)}</button>`
+                : `<span style="color:#64748b;">${escapeHtml(submission.attachmentName)}</span>`
+              }
+            </div>
+          ` : ""}
+          <label class="field" style="margin-top:14px">
+            <span>审核意见</span>
+            <textarea id="processReviewCommentInput" placeholder="请输入通过意见或退回原因"></textarea>
+          </label>
+          <div class="toolbar" style="margin-top:14px">
+            <button type="button" class="ghost-button" onclick="handleProcessReview('${submission.submissionId}', 'reject')">${icon("x")}退回补充</button>
+            <button type="button" class="primary-button" onclick="handleProcessReview('${submission.submissionId}', 'approve')">${icon("check")}通过</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openProcessReviewModal(submissionId) {
+  const submission = (state.processReviews || []).find((item) => String(item.submissionId) === String(submissionId));
+  if (!submission) {
+    showToast("待审核记录不存在");
+    return;
+  }
+  document.getElementById("processReviewModal")?.remove();
+  document.body.insertAdjacentHTML("beforeend", renderProcessReviewModal(submission));
+}
+
+function downloadProcessSubmissionAttachment(submissionId) {
+  const rows = [...(state.processReviews || []), ...(state.processDrafts || [])];
+  const submission = rows.find((item) => String(item.submissionId) === String(submissionId));
+  if (!submission?.attachmentData) {
+    showToast("该流程材料暂无附件");
+    return;
+  }
+  downloadDataUrl(submission.attachmentData, submission.attachmentName || `submission-${submissionId}-attachment`);
+}
+
+window.handleProcessReview = async function(submissionId, result) {
+  const comment = document.getElementById("processReviewCommentInput")?.value || "";
+  try {
+    const response = await fetch(`${API_BASE_URL}/process/submissions/${encodeURIComponent(submissionId)}/review`, {
+      method: "POST",
+      headers: apiHeaders(true),
+      body: JSON.stringify({ result, comment })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "流程审核失败");
+    document.getElementById("processReviewModal")?.remove();
+    await fetchAdminProcessNodes({ silent: true });
+    await fetchProcessReviews({ silent: true });
+    render();
+    showToast(result === "approve" ? "流程材料已审核通过。" : "流程材料已退回给学生补充。");
+  } catch (error) {
+    showToast(error.message);
+  }
 };
 
 window.closeApprovalDetail = function() {
@@ -2777,13 +3321,14 @@ function actionCard(view, title, caption, iconName, tone) {
 function renderTimeline() {
   const timelineNodes = getProcessTimeline();
   return `
-    ${state.isProcessLoading ? `<article class="list-card"><h3>Process data is syncing</h3><p>Loading party process nodes and current student progress.</p></article>` : ""}
-    ${state.processError ? `<article class="list-card is-unread"><h3>Process API unavailable</h3><p>${escapeHtml(state.processError)}. Showing local fallback data.</p></article>` : ""}
+    ${state.isProcessLoading ? `<article class="list-card"><h3>流程数据同步中</h3><p>正在加载党团流程节点、当前进度、草稿和历史记录。</p></article>` : ""}
+    ${state.processError ? `<article class="list-card is-unread"><h3>流程接口异常</h3><p>${escapeHtml(state.processError)}</p></article>` : ""}
+    ${!timelineNodes.length && !state.isProcessLoading ? `<article class="list-card"><h3>暂无流程节点</h3><p>管理员尚未发布党团流程配置。</p></article>` : ""}
     <div class="timeline">
       ${timelineNodes.map((node) => `
         <div class="timeline-step ${node.status === "next" ? "is-next" : ""}">
           <span class="status-dot ${node.status === "done" ? "tone-green" : node.status === "active" ? "" : ""}">${node.status === "next" ? "" : icon(node.status === "done" ? "check" : "route")}</span>
-          <strong>${node.name}</strong>
+          <button type="button" class="ghost-button" style="padding:0;border:none;background:none;color:#0f172a;font-weight:700;justify-content:flex-start;" data-action="view-process-node-detail" data-id="${escapeHtml(node.id)}">${node.name}</button>
           <span>${node.date}</span>
           <span>${node.detail}</span>
         </div>
@@ -3099,6 +3644,8 @@ async function bootstrapSession() {
     const savedRole = getSessionItem('sds_role');
     const savedStudentView = getSessionItem('sds_student_view');
     const savedAdminView = getSessionItem('sds_admin_view');
+    const savedStudentProcessType = getSessionItem('sds_student_process_type');
+    const savedAdminProcessType = getSessionItem('sds_admin_process_type');
 
     await fetchProfile();
     if (!state.role && state.userProfile?.role) {
@@ -3108,6 +3655,7 @@ async function bootstrapSession() {
     if (!state.role) state.role = params.get("role") === "admin" ? "admin" : "student";
 
     if (state.role === "student" || state.role === "student_leader") {
+      state.studentProcessType = normalizeProcessType(savedStudentProcessType || state.studentProcessType);
       if (savedStudentView) {
         state.studentView = savedStudentView;
       }
@@ -3122,12 +3670,17 @@ async function bootstrapSession() {
       }
     } else {
       state.adminView = savedAdminView || state.adminView || "dashboard";
+      state.adminProcessType = normalizeProcessType(savedAdminProcessType || state.adminProcessType);
     }
 
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
     await fetchBasicData({ silent: true });
-    if (state.role !== "student" && state.role !== "student_leader" && state.adminView === "importExport") {
+    if (state.role !== "student" && state.role !== "student_leader" && ["importExport", "processConfig"].includes(state.adminView)) {
       await fetchAdminProcessNodes({ silent: true });
+      await fetchProcessReviews({ silent: true });
+    }
+    if (state.role !== "student" && state.role !== "student_leader" && state.adminView === "approval") {
+      await fetchProcessReviews({ silent: true });
     }
   } catch (error) {
     state.token = null;
@@ -3494,6 +4047,7 @@ window.confirmImportData = async function() {
     state.importResult = data;
     await fetchBasicData({ silent: true });
     await fetchAdminProcessNodes({ silent: true });
+    await fetchProcessReviews({ silent: true });
     showToast("数据导入完成");
   } catch (error) {
     showToast(`导入失败: ${error.message}`);
@@ -3581,11 +4135,13 @@ document.addEventListener("click", async (event) => {
         await fetchPolicies({ silent: true, keyword: "", category: "全部" });
       } else if (state.adminView === "approval") {
         await fetchApplications();
+        await fetchProcessReviews({ silent: true });
       } else if (state.adminView === "templateManage") {
         await fetchTemplates();
-      } else if (state.adminView === "importExport") {
+      } else if (["importExport", "processConfig"].includes(state.adminView)) {
         await fetchBasicData({ silent: true });
         await fetchAdminProcessNodes({ silent: true });
+        await fetchProcessReviews({ silent: true });
       }
       if (["dashboard", "users", "noticeManage", "training"].includes(state.adminView)) {
         await fetchBasicData({ silent: true });
@@ -3690,14 +4246,13 @@ document.addEventListener("click", async (event) => {
     "copy-link": "已复制官方渠道说明编号。",
     "student-new-application": "已定位到证明申请表。",
     "submit-material": "请在节点操作区上传材料。",
-    "save-draft": "草稿已保存。",
     "notice-save-draft": "通知草稿已保存。",
     "mark-all-read": "当前筛选范围已标记为已读。",
     "upload-transcript": "已模拟选择成绩单文件。",
     "new-notice": "已打开通知发布工作区。",
-    "publish-notice": "通知已模拟发布并写入投递队列。",
+    "publish-notice": "通知已发布。",
     "preview-notice": "已生成通知预览。",
-    "add-node": "已准备新增流程节点。",
+    "add-node": "已切换到新增节点表单。",
     "approval-return": "申请已模拟退回补充。",
     "approval-pass": "申请已模拟通过，电子证明将进入生成队列。",
     "start-import": "请选择一个导入类型后再上传 Excel 文件。",
@@ -3729,6 +4284,33 @@ document.addEventListener("click", async (event) => {
       return;
     }
     pickImportFile(configs[0].type);
+    return;
+  }
+  if (action === "submit-material") {
+    const form = document.querySelector('form[data-form="process"]');
+    if (form) {
+      form.requestSubmit();
+    }
+    return;
+  }
+  if (action === "switch-student-process-type") {
+    const processType = event.target.closest("[data-action]")?.dataset.type;
+    state.studentProcessType = normalizeProcessType(processType);
+    resetProcessForm();
+    saveCurrentView();
+    await fetchProcessData({ silent: true, processType: state.studentProcessType });
+    render();
+    return;
+  }
+  if (action === "switch-admin-process-type") {
+    const processType = event.target.closest("[data-action]")?.dataset.type;
+    state.adminProcessType = normalizeProcessType(processType);
+    state.editingProcessNodeId = null;
+    state.processNodeAttachment = null;
+    saveCurrentView();
+    await fetchAdminProcessNodes({ silent: true, processType: state.adminProcessType });
+    await fetchProcessReviews({ silent: true, processType: state.adminProcessType });
+    render();
     return;
   }
   if (action === "toggle-notice-tag") {
@@ -3778,6 +4360,99 @@ document.addEventListener("click", async (event) => {
     showToast("通知草稿已保存");
     return;
   }
+  if (action === "save-process-draft") {
+    const form = document.querySelector('form[data-form="process"]');
+    if (!form) return;
+    const formData = new FormData(form);
+    const selectedMaterialType = formData.get("materialType")?.toString() || "";
+    const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
+    const materialType = selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType;
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
+    let attachmentData = state.processDraftAttachment?.data || state.processForm?.attachmentData || "";
+    let attachmentName = state.processDraftAttachment?.name || state.processForm?.attachmentName || "";
+    if (attachmentFile) {
+      attachmentData = await fileToDataUrl(attachmentFile);
+      attachmentName = attachmentFile.name;
+    }
+    const payload = {
+      submissionId: state.editingProcessDraftId || undefined,
+      nodeId: formData.get("nodeId")?.toString(),
+      materialType,
+      description: formData.get("description")?.toString().trim(),
+      attachmentName,
+      attachmentData,
+      status: "draft"
+    };
+    if (!payload.nodeId || !selectedMaterialType) {
+      showToast("请先选择流程节点和材料类型。");
+      return;
+    }
+    if (selectedMaterialType === "其他" && !customMaterialType) {
+      showToast("请选择“其他”时请补充具体材料名称。");
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/process/submissions`, {
+        method: "POST",
+        headers: apiHeaders(true),
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "流程草稿保存失败");
+      state.processDraftAttachment = data.attachmentData ? { name: data.attachmentName, data: data.attachmentData } : null;
+      state.processForm = {
+        nodeId: data.nodeId || payload.nodeId || "",
+        materialType: data.materialType || payload.materialType || getProcessBaseMaterialOptions(getStudentProcessType())[0],
+        customMaterialType: isCustomProcessMaterial(data.materialType || payload.materialType, getStudentProcessType())
+          ? (data.materialType || payload.materialType || "")
+          : "",
+        description: data.description || payload.description || "",
+        attachmentName: data.attachmentName || attachmentName || "",
+        attachmentData: data.attachmentData || attachmentData || ""
+      };
+      state.editingProcessDraftId = data.submissionId || state.editingProcessDraftId;
+      await fetchProcessData({ silent: true });
+      render();
+      showToast("党团流程草稿已保存");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  if (action === "load-process-draft") {
+    const draftId = event.target.closest("[data-action]")?.dataset.id;
+    const draft = state.processDrafts.find((item) => String(item.submissionId) === String(draftId));
+    if (!draft) {
+      showToast("未找到该流程草稿");
+      return;
+    }
+    loadProcessDraftToForm(draft);
+    render();
+    showToast("流程草稿已载入");
+    return;
+  }
+  if (action === "delete-process-draft") {
+    const draftId = event.target.closest("[data-action]")?.dataset.id;
+    if (!draftId) return;
+    if (!confirm("确定要删除这条流程草稿吗？")) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/process/submissions/${encodeURIComponent(draftId)}`, {
+        method: "DELETE",
+        headers: apiHeaders()
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "流程草稿删除失败");
+      if (String(state.editingProcessDraftId) === String(draftId)) {
+        resetProcessForm();
+      }
+      await fetchProcessData({ silent: true });
+      render();
+      showToast("流程草稿已删除");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
   if (action === "view-notice") {
     const noticeId = event.target.closest("[data-action]")?.dataset.id;
     openNoticeDetail(noticeId);
@@ -3816,6 +4491,80 @@ document.addEventListener("click", async (event) => {
     if (form) {
       form.requestSubmit();
     }
+    return;
+  }
+  if (action === "add-node") {
+    state.editingProcessNodeId = null;
+    state.processNodeAttachment = null;
+    render();
+    return;
+  }
+  if (action === "process-node-edit") {
+    state.editingProcessNodeId = event.target.closest("[data-action]")?.dataset.id || null;
+    const editingNode = (state.processNodes || []).find((item) => String(item.node_id) === String(state.editingProcessNodeId));
+    state.processNodeAttachment = editingNode?.attachment_data
+      ? { name: editingNode.attachment_name || "节点附件", data: editingNode.attachment_data }
+      : null;
+    render();
+    showToast("已载入该流程节点，可在右侧维护。");
+    return;
+  }
+  if (action === "process-node-delete") {
+    const nodeId = event.target.closest("[data-action]")?.dataset.id;
+    if (!nodeId) return;
+    if (!confirm("确定要删除该流程节点吗？该节点下的流程记录也会一并删除。")) return;
+    try {
+      await deleteProcessNode(nodeId);
+      if (String(state.editingProcessNodeId) === String(nodeId)) {
+        state.editingProcessNodeId = null;
+        state.processNodeAttachment = null;
+      }
+      await fetchAdminProcessNodes({ silent: true });
+      render();
+      showToast("流程节点已删除并刷新列表。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  if (action === "process-node-reset") {
+    state.editingProcessNodeId = null;
+    state.processNodeAttachment = null;
+    render();
+    return;
+  }
+  if (action === "view-process-node-detail") {
+    const nodeId = event.target.closest("[data-action]")?.dataset.id;
+    openProcessNodeDetail(nodeId);
+    return;
+  }
+  if (action === "review-process-submission") {
+    const submissionId = event.target.closest("[data-action]")?.dataset.id;
+    openProcessReviewModal(submissionId);
+    return;
+  }
+  if (action === "download-process-node-attachment") {
+    const nodeId = event.target.closest("[data-action]")?.dataset.id;
+    downloadProcessNodeAttachment(nodeId);
+    return;
+  }
+  if (action === "download-process-submission-attachment") {
+    const submissionId = event.target.closest("[data-action]")?.dataset.id;
+    downloadProcessSubmissionAttachment(submissionId);
+    return;
+  }
+  if (action === "close-process-node-modal") {
+    document.getElementById("processNodeDetailModal")?.remove();
+    return;
+  }
+  if (action === "close-process-review-modal") {
+    document.getElementById("processReviewModal")?.remove();
+    render();
+    return;
+  }
+  if (action === "reset-process-form") {
+    resetProcessForm();
+    render();
     return;
   }
   if (action === "policy-form-reset" || action === "知识库管理-primary") {
@@ -4001,6 +4750,23 @@ document.addEventListener("input", (event) => {
   if (event.target.id === "globalSearchInput") {
     renderGlobalSearchResults();
   }
+  if (event.target.closest('form[data-form="process"]')) {
+    const form = event.target.closest('form[data-form="process"]');
+    if (form) {
+      const formData = new FormData(form);
+      const processType = getStudentProcessType();
+      const selectedMaterialType = formData.get("materialType")?.toString() || getProcessBaseMaterialOptions(processType)[0];
+      const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
+      state.processForm = {
+        nodeId: formData.get("nodeId")?.toString() || "",
+        materialType: selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType,
+        customMaterialType,
+        description: formData.get("description")?.toString() || "",
+        attachmentName: state.processDraftAttachment?.name || state.processForm?.attachmentName || "",
+        attachmentData: state.processDraftAttachment?.data || state.processForm?.attachmentData || ""
+      };
+    }
+  }
 });
 
 document.addEventListener("change", async (event) => {
@@ -4008,6 +4774,44 @@ document.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     await uploadTranscriptFile(file);
+  }
+  if (event.target.matches('form[data-form="process"] input[name="attachment"]')) {
+    const file = event.target.files?.[0] || null;
+    state.processDraftAttachment = file ? { name: file.name, data: "" } : null;
+    const hint = document.getElementById("processAttachmentHint");
+    if (hint) {
+      hint.textContent = state.processDraftAttachment?.name
+        ? `当前已缓存附件：${state.processDraftAttachment.name}`
+        : "支持上传思想汇报、谈话记录等附件。";
+    }
+  }
+  if (event.target.matches('form[data-form="process"] select[name="materialType"]')) {
+    const form = event.target.closest('form[data-form="process"]');
+    if (form) {
+      const formData = new FormData(form);
+      const processType = getStudentProcessType();
+      const selectedMaterialType = formData.get("materialType")?.toString() || getProcessBaseMaterialOptions(processType)[0];
+      const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
+      state.processForm = {
+        nodeId: formData.get("nodeId")?.toString() || "",
+        materialType: selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType,
+        customMaterialType,
+        description: formData.get("description")?.toString() || "",
+        attachmentName: state.processDraftAttachment?.name || state.processForm?.attachmentName || "",
+        attachmentData: state.processDraftAttachment?.data || state.processForm?.attachmentData || ""
+      };
+      render();
+    }
+  }
+  if (event.target.matches('form[data-form="process-node"] input[name="attachment"]')) {
+    const file = event.target.files?.[0] || null;
+    state.processNodeAttachment = file ? { name: file.name, data: "" } : null;
+    const hint = document.getElementById("processNodeAttachmentHint");
+    if (hint) {
+      hint.textContent = state.processNodeAttachment?.name
+        ? `当前已缓存附件：${state.processNodeAttachment.name}`
+        : "支持上传该节点的说明文档、模板附件，学生端详情可下载。";
+    }
   }
   if (event.target.matches('form[data-form="notice"] input[name="attachment"]')) {
     const file = event.target.files?.[0] || null;
@@ -4093,6 +4897,92 @@ document.addEventListener("submit", async (event) => {
       form.reset();
       render();
       showToast("通知已发布并刷新列表。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+
+  if (form.dataset.form === "process") {
+    const formData = new FormData(form);
+    const selectedMaterialType = formData.get("materialType")?.toString() || "";
+    const customMaterialType = formData.get("customMaterialType")?.toString().trim() || "";
+    const materialType = selectedMaterialType === "其他" ? customMaterialType : selectedMaterialType;
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
+    let attachmentData = state.processDraftAttachment?.data || state.processForm?.attachmentData || "";
+    let attachmentName = state.processDraftAttachment?.name || state.processForm?.attachmentName || "";
+    if (attachmentFile) {
+      attachmentData = await fileToDataUrl(attachmentFile);
+      attachmentName = attachmentFile.name;
+    }
+    const payload = {
+      submissionId: state.editingProcessDraftId || undefined,
+      nodeId: formData.get("nodeId")?.toString(),
+      materialType,
+      description: formData.get("description")?.toString().trim(),
+      attachmentName,
+      attachmentData,
+      status: "pending"
+    };
+    if (!payload.nodeId || !selectedMaterialType) {
+      showToast("请先选择流程节点和材料类型。");
+      return;
+    }
+    if (selectedMaterialType === "其他" && !customMaterialType) {
+      showToast("请选择“其他”时请补充具体材料名称。");
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/process/submissions`, {
+        method: "POST",
+        headers: apiHeaders(true),
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "流程材料提交失败");
+      resetProcessForm();
+      form.reset();
+      await fetchProcessData({ silent: true });
+      render();
+      showToast("党团流程材料已提交，等待管理员审核。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+
+  if (form.dataset.form === "process-node") {
+    const formData = new FormData(form);
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
+    let attachmentData = state.processNodeAttachment?.data || "";
+    let attachmentName = state.processNodeAttachment?.name || "";
+    if (attachmentFile) {
+      attachmentData = await fileToDataUrl(attachmentFile);
+      attachmentName = attachmentFile.name;
+    }
+    const payload = {
+      processType: formData.get("processType")?.toString().trim() || "party",
+      sequence: Number(formData.get("sequence")),
+      nodeName: formData.get("nodeName")?.toString().trim(),
+      nodeDetail: formData.get("nodeDetail")?.toString().trim(),
+      scheduledAt: formData.get("scheduledAt")?.toString().trim(),
+      reminderRule: formData.get("reminderRule")?.toString().trim(),
+      attachmentName,
+      attachmentData
+    };
+    if (!payload.nodeName || !Number.isFinite(payload.sequence) || payload.sequence <= 0) {
+      showToast("请完整填写节点名称和有效顺序。");
+      return;
+    }
+    try {
+      await saveProcessNode(payload);
+      await fetchAdminProcessNodes({ silent: true });
+      await fetchProcessReviews({ silent: true });
+      state.editingProcessNodeId = null;
+      state.processNodeAttachment = null;
+      form.reset();
+      render();
+      showToast("流程节点已保存并刷新列表。");
     } catch (error) {
       showToast(error.message);
     }
