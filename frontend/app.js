@@ -907,6 +907,7 @@ async function markNoticeRead(noticeId) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "标记已读失败");
+    await fetchBasicData({ silent: true });
   }
 
   setNoticeReadState([id]);
