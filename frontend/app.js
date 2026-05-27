@@ -29,6 +29,7 @@ const state = {
   studentAppView: "list", // "list", "new", "profile"
   adminView: "dashboard",
   policyQuery: "",
+  globalSearchQuery: "",
   policyCategory: "全部",
   policies: [],
   templates: [], // fetched templates
@@ -1855,7 +1856,7 @@ function renderStudentHome() {
   const todoItems = getStudentTodoItems();
   return `
     ${pageHead(`上午好，${escapeHtml(userName)}`, `待办 ${getProcessPendingCount()} 项 · 未读通知 ${unreadNoticeCount} 条 · 当前党团阶段：${escapeHtml(currentStageText)}`, [
-      ["quick-search", "检索政策", "search", "ghost-button"],
+      ["quick-search", "全站检索", "search", "ghost-button"],
       ["student-new-application", "提交申请", "plus", "primary-button"]
     ])}
     <section class="grid four">
@@ -4277,7 +4278,7 @@ function openQuickSearch() {
   modal.classList.add("is-open");
   modal.setAttribute("aria-hidden", "false");
   const input = document.getElementById("globalSearchInput");
-  input.value = state.policyQuery;
+  input.value = state.globalSearchQuery || state.policyQuery;
   renderGlobalSearchResults();
   input.focus();
 }
@@ -4289,22 +4290,295 @@ function closeModal() {
   modal.setAttribute("aria-hidden", "true");
 }
 
+function isAdminSearchRole() {
+  return ["admin", "teacher", "leader"].includes(state.role);
+}
+
+function collectSearchableText(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => collectSearchableText(item)).join(" ");
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).map((item) => collectSearchableText(item)).join(" ");
+  }
+  return value == null ? "" : String(value);
+}
+
+function matchesGlobalSearchQuery(query, ...parts) {
+  return !query || collectSearchableText(parts).toLowerCase().includes(query);
+}
+
+function summarizeSearchText(text, fallback = "暂无说明") {
+  const value = String(text || fallback).trim();
+  return value.length > 88 ? `${value.slice(0, 85)}...` : value;
+}
+
+function renderSearchActionButton(button) {
+  if (!button) return "";
+  const attrs = [`data-action="${escapeHtml(button.action)}"`];
+  if (button.id !== undefined) attrs.push(`data-id="${escapeHtml(String(button.id))}"`);
+  if (button.url) attrs.push(`data-url="${escapeHtml(button.url)}"`);
+  if (button.name) attrs.push(`data-name="${escapeHtml(button.name)}"`);
+  return `<button type="button" class="${button.className || "ghost-button"}" ${attrs.join(" ")}>${icon(button.icon || "arrow")}${escapeHtml(button.label)}</button>`;
+}
+
+function renderGlobalSearchSection(section) {
+  return `
+    <section class="panel" style="margin-top:12px">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">全站搜索</p>
+          <h2>${escapeHtml(section.title)}</h2>
+          <p>${escapeHtml(section.description)}</p>
+        </div>
+        ${badge(String(section.items.length), "neutral")}
+      </div>
+      <div class="notice-list">
+        ${section.items.map((item) => `
+          <article class="list-card">
+            <header>
+              <h3>${escapeHtml(item.title)}</h3>
+              ${badge(escapeHtml(item.badgeText || section.title), item.badgeTone || "neutral")}
+            </header>
+            <p>${escapeHtml(item.summary)}</p>
+            ${item.meta && item.meta.length ? `
+              <div class="list-meta">
+                ${item.meta.filter(Boolean).map((meta) => `<span>${escapeHtml(meta)}</span>`).join("")}
+              </div>
+            ` : ""}
+            <div class="toolbar" style="margin-top:12px">
+              ${renderSearchActionButton(item.primaryAction)}
+              ${renderSearchActionButton(item.secondaryAction)}
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildStudentGlobalSearchSections(query) {
+  const maxResults = query ? 5 : 3;
+  const sections = [];
+
+  const policies = (state.policies || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.title, item.category, item.keywords, item.answer, item.owner))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title || "未命名知识条目",
+      summary: summarizeSearchText(item.answer, "暂无知识条目说明。"),
+      meta: [item.category || "未分类", item.owner || "知识库维护人", item.updated ? `更新于 ${item.updated}` : ""],
+      badgeText: "智能咨询",
+      primaryAction: { action: "go-consult", label: "进入咨询", className: "secondary-button", icon: "message" },
+      secondaryAction: item.attachmentUrl
+        ? { action: "download-policy-attachment", label: "下载附件", className: "ghost-button", icon: "download", url: item.attachmentUrl, name: item.attachment || "知识库附件" }
+        : null
+    }));
+  if (policies.length) {
+    sections.push({ title: "智能咨询", description: "知识库政策、办理说明与附件信息。", items: policies });
+  }
+
+  const notices = getNoticeRows()
+    .filter((item) => matchesGlobalSearchQuery(query, item.title, item.summary, item.text, item.type, item.tags, item.target, item.time))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title || "未命名通知",
+      summary: summarizeSearchText(item.summary || item.text, "暂无通知简介。"),
+      meta: [item.time || "发布时间待补充", item.target || "面向学生", item.unread ? "未读" : "已读"],
+      badgeText: "通知公告",
+      badgeTone: item.unread ? "warning" : "neutral",
+      primaryAction: { action: "search-open-notice", label: "查看通知", className: "secondary-button", icon: "bell", id: item.id },
+      secondaryAction: { action: "go-notices", label: "进入通知", className: "ghost-button", icon: "arrow" }
+    }));
+  if (notices.length) {
+    sections.push({ title: "通知公告", description: "学生可见的通知简介、状态与详情入口。", items: notices });
+  }
+
+  const applications = (state.applications || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.id, item.type, item.status, item.purpose, item.comment, item.admin_comment, item.submit))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: `${item.type || "证明申请"} · ${item.id || "未编号"}`,
+      summary: summarizeSearchText(item.admin_comment || item.comment || item.purpose, "查看申请用途、状态与审核意见。"),
+      meta: [item.status || "状态待定", item.submit || "提交时间待补充"],
+      badgeText: "申请与证明",
+      badgeTone: item.status === "待补充" ? "danger" : item.status === "已通过" ? "success" : "warning",
+      primaryAction: { action: "view-application", label: "查看记录", className: "secondary-button", icon: "file", id: item.id },
+      secondaryAction: { action: "go-applications", label: "进入申请", className: "ghost-button", icon: "arrow" }
+    }));
+  if (applications.length) {
+    sections.push({ title: "申请与证明", description: "申请记录、审核状态与补交提醒。", items: applications });
+  }
+
+  const templates = (state.templates || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.name, item.type, item.version))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.name || "未命名模板",
+      summary: summarizeSearchText(`${item.type || "模板"} · 版本 ${item.version || "未标注"}`, "集中下载业务模板。"),
+      meta: [item.type || "模板", item.version ? `版本 ${item.version}` : ""],
+      badgeText: "模板下载",
+      primaryAction: { action: "search-download-template", label: "下载模板", className: "secondary-button", icon: "download", id: item.id },
+      secondaryAction: { action: "go-templates", label: "进入模板", className: "ghost-button", icon: "arrow" }
+    }));
+  if (templates.length) {
+    sections.push({ title: "模板下载", description: "证明、党团、奖助与成绩分析模板。", items: templates });
+  }
+
+  const processItems = getProcessTimeline()
+    .filter((item) => matchesGlobalSearchQuery(query, item.name, item.detail, item.status, getProcessTypeLabel(getStudentProcessType())))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.name || "未命名节点",
+      summary: summarizeSearchText(item.detail, "查看节点状态、时间与提交要求。"),
+      meta: [getProcessTypeLabel(getStudentProcessType()), item.status || "流程状态待定"],
+      badgeText: "党团流程",
+      badgeTone: item.status === "done" ? "success" : item.status === "active" ? "warning" : "neutral",
+      primaryAction: { action: "go-process", label: "进入流程", className: "secondary-button", icon: "arrow" }
+    }));
+  if (processItems.length) {
+    sections.push({ title: "党团流程", description: "当前流程节点、时间要求与提交状态。", items: processItems });
+  }
+
+  if (state.analysisResult && matchesGlobalSearchQuery(query, state.analysisResult)) {
+    sections.push({
+      title: "成绩分析",
+      description: "成绩单上传后的学业分析结果。",
+      items: [{
+        title: "学业成绩分析结果",
+        summary: summarizeSearchText(collectSearchableText(state.analysisResult), "查看成绩分析摘要与建议。"),
+        meta: ["成绩分析"],
+        badgeText: "成绩分析",
+        primaryAction: { action: "go-analysis", label: "进入分析", className: "secondary-button", icon: "chart" }
+      }]
+    });
+  }
+
+  return sections;
+}
+
+function buildAdminGlobalSearchSections(query) {
+  const maxResults = query ? 5 : 3;
+  const sections = [];
+
+  const policies = (state.policies || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.title, item.category, item.keywords, item.answer, item.owner))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title || "未命名知识条目",
+      summary: summarizeSearchText(item.answer, "暂无知识条目说明。"),
+      meta: [item.category || "未分类", item.owner || "知识库维护人", item.updated ? `更新于 ${item.updated}` : ""],
+      badgeText: "知识库管理",
+      primaryAction: { action: "go-knowledge", label: "进入知识库", className: "secondary-button", icon: "message" },
+      secondaryAction: item.attachmentUrl
+        ? { action: "download-policy-attachment", label: "下载附件", className: "ghost-button", icon: "download", url: item.attachmentUrl, name: item.attachment || "知识库附件" }
+        : null
+    }));
+  if (policies.length) {
+    sections.push({ title: "知识库管理", description: "检索政策条目、关键词与附件内容。", items: policies });
+  }
+
+  const notices = getNoticeRows()
+    .filter((item) => matchesGlobalSearchQuery(query, item.title, item.summary, item.text, item.type, item.tags, item.target, item.time, item.status))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title || "未命名通知",
+      summary: summarizeSearchText(item.summary || item.text, "暂无通知简介。"),
+      meta: [item.status || "已发布", item.time || "发布时间待补充", item.target || "面向学生"],
+      badgeText: "通知管理",
+      primaryAction: { action: "go-notice-manage", label: "进入通知", className: "secondary-button", icon: "bell" }
+    }));
+  if (notices.length) {
+    sections.push({ title: "通知管理", description: "检索已发布通知与投递范围。", items: notices });
+  }
+
+  const approvals = (state.applications || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.id, item.type, item.status, item.applicant, item.purpose, item.submit))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: `${item.type || "审批单"} · ${item.id || "未编号"}`,
+      summary: summarizeSearchText(item.purpose || item.comment || item.applicant, "查看审批状态与申请信息。"),
+      meta: [item.status || "状态待定", item.applicant || "申请人待补充", item.submit || "提交时间待补充"],
+      badgeText: "审批管理",
+      badgeTone: item.status === "待补充" ? "danger" : item.status === "已通过" ? "success" : "warning",
+      primaryAction: { action: "go-approval", label: "进入审批", className: "secondary-button", icon: "file" }
+    }));
+  if (approvals.length) {
+    sections.push({ title: "审批管理", description: "检索申请审批状态与申请人信息。", items: approvals });
+  }
+
+  const templates = (state.templates || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.name, item.type, item.version))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.name || "未命名模板",
+      summary: summarizeSearchText(`${item.type || "模板"} · 版本 ${item.version || "未标注"}`, "查看并维护模板文件。"),
+      meta: [item.type || "模板", item.version ? `版本 ${item.version}` : ""],
+      badgeText: "模板管理",
+      primaryAction: { action: "go-template-manage", label: "进入模板", className: "secondary-button", icon: "download" },
+      secondaryAction: { action: "search-download-template", label: "直接下载", className: "ghost-button", icon: "download", id: item.id }
+    }));
+  if (templates.length) {
+    sections.push({ title: "模板管理", description: "检索后台模板条目与版本信息。", items: templates });
+  }
+
+  const processNodes = (state.processNodes || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.node_name, item.process_type, item.reminder_rule, item.sequence, item.start_at, item.due_at))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.node_name || "未命名节点",
+      summary: summarizeSearchText(item.reminder_rule || "查看节点时间、顺序与提醒规则。"),
+      meta: [getProcessTypeLabel(item.process_type), `顺序 ${item.sequence || "-"}`],
+      badgeText: "流程配置",
+      primaryAction: { action: "go-process-config", label: "进入流程配置", className: "secondary-button", icon: "arrow" }
+    }));
+  if (processNodes.length) {
+    sections.push({ title: "流程配置", description: "检索党团流程节点、顺序与提醒规则。", items: processNodes });
+  }
+
+  const users = (state.userRecords || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.name, item.account_id, item.student_no, item.role, item.major, item.class_name, item.grade))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.name || item.account_id || "未命名用户",
+      summary: summarizeSearchText(`${item.role || "用户"} · ${item.major || item.class_name || "暂无专业班级信息"}`, "查看用户资料与角色。"),
+      meta: [item.account_id || "", item.grade || "", item.role || "用户"],
+      badgeText: "用户管理",
+      primaryAction: { action: "go-users", label: "进入用户管理", className: "secondary-button", icon: "users" }
+    }));
+  if (users.length) {
+    sections.push({ title: "用户管理", description: "检索账号、身份、专业与班级信息。", items: users });
+  }
+
+  const plans = (state.planRecords || [])
+    .filter((item) => matchesGlobalSearchQuery(query, item.title, item.major, item.grade, item.summary, item.status, item.attachment_name))
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title || "未命名培养方案",
+      summary: summarizeSearchText(item.summary || "查看培养方案说明、年级与附件。"),
+      meta: [item.major || "专业待补充", item.grade || "", item.status || "状态待定"],
+      badgeText: "培养方案",
+      primaryAction: { action: "go-training", label: "进入培养方案", className: "secondary-button", icon: "chart" }
+    }));
+  if (plans.length) {
+    sections.push({ title: "培养方案", description: "检索培养方案、年级适配与附件。", items: plans });
+  }
+
+  return sections;
+}
+
 function renderGlobalSearchResults() {
   const input = document.getElementById("globalSearchInput");
   const results = document.getElementById("globalSearchResults");
+  if (!input || !results) return;
   const query = input.value.trim().toLowerCase();
-  const source = state.policies;
-  const matched = source.filter((item) => `${item.title} ${item.keywords} ${item.answer}`.toLowerCase().includes(query));
-  results.innerHTML = (query ? matched : source).map((item) => `
-    <article class="list-card">
-      <header><h3>${escapeHtml(item.title)}</h3>${badge(escapeHtml(item.category), "neutral")}</header>
-      <p>${escapeHtml(item.answer)}</p>
-      <div class="toolbar">
-        <button class="secondary-button" data-action="go-consult">${icon("message")}进入咨询</button>
-        <button class="ghost-button" data-action="download-template">${icon("download")}下载附件</button>
-      </div>
-    </article>
-  `).join("") || `<article class="list-card"><h3>暂无结果</h3><p>请换一个关键词。</p></article>`;
+  state.globalSearchQuery = input.value;
+  const sections = isAdminSearchRole()
+    ? buildAdminGlobalSearchSections(query)
+    : buildStudentGlobalSearchSections(query);
+  results.innerHTML = sections.length
+    ? sections.map((section) => renderGlobalSearchSection(section)).join("")
+    : `<article class="list-card"><h3>暂无结果</h3><p>请尝试更换关键词，或前往对应模块查看完整内容。</p></article>`;
 }
 
 document.addEventListener("click", async (event) => {
@@ -4487,6 +4761,20 @@ document.addEventListener("click", async (event) => {
     "policy-search": "已根据关键词刷新知识库匹配结果。",
     "download-template": "请在具体业务模块中选择真实模板或数据文件。",
     "open-template-center": null,
+    "go-notices": null,
+    "go-applications": null,
+    "go-templates": null,
+    "go-process": null,
+    "go-analysis": null,
+    "go-knowledge": null,
+    "go-notice-manage": null,
+    "go-template-manage": null,
+    "go-approval": null,
+    "go-process-config": null,
+    "go-users": null,
+    "go-training": null,
+    "search-open-notice": null,
+    "search-download-template": null,
     "copy-link": "已复制官方渠道说明编号。",
     "student-new-application": "已定位到证明申请表。",
     "submit-material": "请在节点操作区上传材料。",
@@ -4504,6 +4792,108 @@ document.addEventListener("click", async (event) => {
 
   if (action === "quick-search") {
     openQuickSearch();
+    return;
+  }
+  if (action === "go-notices") {
+    closeModal();
+    state.studentView = "notices";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-applications") {
+    closeModal();
+    state.studentView = "applications";
+    state.studentAppView = "list";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-templates") {
+    closeModal();
+    state.studentView = "templates";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-process") {
+    closeModal();
+    state.studentView = "process";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-analysis") {
+    closeModal();
+    state.studentView = "analysis";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-knowledge") {
+    closeModal();
+    state.adminView = "knowledge";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-notice-manage") {
+    closeModal();
+    state.adminView = "noticeManage";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-template-manage") {
+    closeModal();
+    state.adminView = "templateManage";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-approval") {
+    closeModal();
+    state.adminView = "approval";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-process-config") {
+    closeModal();
+    state.adminView = "processConfig";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-users") {
+    closeModal();
+    state.adminView = "users";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "go-training") {
+    closeModal();
+    state.adminView = "training";
+    saveCurrentView();
+    render();
+    return;
+  }
+  if (action === "search-open-notice") {
+    const noticeId = event.target.closest("[data-action]")?.dataset.id;
+    closeModal();
+    state.studentView = "notices";
+    saveCurrentView();
+    render();
+    if (noticeId) await openNoticeDetail(noticeId);
+    return;
+  }
+  if (action === "search-download-template") {
+    const templateId = event.target.closest("[data-action]")?.dataset.id;
+    closeModal();
+    if (templateId) {
+      await window.downloadTemplateDocx(templateId);
+    }
     return;
   }
   if (action === "mobile-menu-toggle") {
@@ -5005,7 +5395,6 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "go-consult") {
     closeModal();
-    state.role = "student";
     state.studentView = "consult";
     saveCurrentView();
     state.policyQuery = document.getElementById("globalSearchInput").value;
@@ -5040,6 +5429,7 @@ document.addEventListener("input", (event) => {
     state.policyQuery = event.target.value;
   }
   if (event.target.id === "globalSearchInput") {
+    state.globalSearchQuery = event.target.value;
     renderGlobalSearchResults();
   }
   if (event.target.closest('form[data-form="process"]')) {
