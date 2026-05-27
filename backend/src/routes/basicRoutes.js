@@ -4,6 +4,8 @@ const {
   createNotice,
   updateNotice,
   deleteNotice,
+  markNoticeRead,
+  markAllNoticesRead,
   getUsers,
   createUser,
   updateUser,
@@ -24,6 +26,8 @@ const router = express.Router();
 
 router.get('/notices', authenticate, getNotices);
 router.post('/notices', authenticate, authorize(['admin', 'teacher', 'leader']), createNotice);
+router.post('/notices/read-all', authenticate, authorize(['student', 'student_leader']), markAllNoticesRead);
+router.post('/notices/:noticeId/read', authenticate, authorize(['student', 'student_leader']), markNoticeRead);
 router.put('/notices/:noticeId', authenticate, authorize(['admin', 'teacher', 'leader']), updateNotice);
 router.delete('/notices/:noticeId', authenticate, authorize(['admin', 'teacher', 'leader']), deleteNotice);
 router.get('/users', authenticate, authorize(['admin', 'teacher', 'leader']), getUsers);
