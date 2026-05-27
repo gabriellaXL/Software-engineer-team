@@ -93,6 +93,9 @@ exports.downloadTemplate = async (req, res) => {
     const templatesDir = ensureTemplatesDir();
     const fileNameOnDisk = fileUrl.replace('/uploads/templates/', '');
     const filePath = path.join(templatesDir, fileNameOnDisk);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Template file missing on server, please re-upload it from template management' });
+    }
 
     const extension = path.extname(fileNameOnDisk) || '.docx';
     const downloadName = `${rows[0].name || id}${extension}`;

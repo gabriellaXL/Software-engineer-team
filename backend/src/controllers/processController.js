@@ -69,6 +69,47 @@ function normalizeReviewDecision(value) {
   throw new Error('审核结果无效');
 }
 
+function isResolvedStudentProcessNode(nodeId, recordMap, submissionMap) {
+  const progressStatus = normalizeProgressStatus(recordMap.get(nodeId));
+  if (progressStatus === 'Completed') return true;
+  return normalizeSubmissionStatus(submissionMap.get(nodeId)) === 'approved';
+}
+
+async function getCurrentStudentStageNode(client, studentId, processType) {
+  const normalizedProcessType = normalizeProcessType(processType);
+  const { rows: nodeRows } = await client.query(
+    'SELECT * FROM party_process_node WHERE process_type = $1 ORDER BY sequence ASC',
+    [normalizedProcessType]
+  );
+  if (!nodeRows.length) return null;
+
+  const { rows: recordRows } = await client.query(
+    `SELECT r.node_id, r.status
+     FROM student_process_record r
+     JOIN party_process_node n ON n.node_id = r.node_id
+     WHERE r.student_id = $1 AND n.process_type = $2`,
+    [studentId, normalizedProcessType]
+  );
+  const recordMap = new Map(recordRows.map((row) => [row.node_id, row.status]));
+
+  const { rows: submissionRows } = await client.query(
+    `SELECT s.node_id, s.status
+     FROM party_process_submission s
+     JOIN party_process_node n ON n.node_id = s.node_id
+     WHERE s.student_id = $1 AND n.process_type = $2
+     ORDER BY COALESCE(s.updated_at, s.reviewed_at, s.submitted_at, s.created_at) DESC, s.submission_id DESC`,
+    [studentId, normalizedProcessType]
+  );
+  const submissionMap = new Map();
+  for (const row of submissionRows) {
+    if (!submissionMap.has(row.node_id)) {
+      submissionMap.set(row.node_id, row.status);
+    }
+  }
+
+  return nodeRows.find((node) => !isResolvedStudentProcessNode(node.node_id, recordMap, submissionMap)) || null;
+}
+
 function mapSubmission(row) {
   return {
     submissionId: row.submission_id,
@@ -438,13 +479,22 @@ exports.saveProcessSubmission = async (req, res) => {
       return res.status(404).json({ error: 'Student profile not found' });
     }
 
-    const { rows: nodeRows } = await db.query(
+    client = await db.getClient();
+
+    const { rows: nodeRows } = await client.query(
       'SELECT * FROM party_process_node WHERE node_id = $1',
       [nodeId]
     );
     const node = nodeRows[0];
     if (!node) {
       return res.status(404).json({ error: '流程节点不存在' });
+    }
+    const currentStageNode = await getCurrentStudentStageNode(client, resolvedStudentId, node.process_type);
+    if (!currentStageNode) {
+      return res.status(400).json({ error: '当前流程暂无可提交的节点' });
+    }
+    if (String(currentStageNode.node_id) !== String(nodeId)) {
+      return res.status(400).json({ error: `当前仅可提交节点“${currentStageNode.node_name}”的材料` });
     }
     const now = Date.now();
     const startTime = node.start_at || node.scheduled_at ? new Date(node.start_at || node.scheduled_at).getTime() : null;
@@ -456,7 +506,6 @@ exports.saveProcessSubmission = async (req, res) => {
       return res.status(400).json({ error: '当前已超过该节点截止时间，暂不可提交' });
     }
 
-    client = await db.getClient();
     await client.query('BEGIN');
 
     let targetSubmissionId = submissionId;

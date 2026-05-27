@@ -387,7 +387,7 @@ function getProcessNodeDueAt(node) {
   return parseProcessDateValue(node?.due_at);
 }
 
-function getProcessNodeWindowText(node, fallback = "未设置") {
+function getProcessNodeWindowText(node, fallback = "未设置开始和截止时间") {
   const startText = node?.start_at || node?.scheduled_at ? formatProcessDate(node.start_at || node.scheduled_at, "") : "";
   const dueText = node?.due_at ? formatProcessDate(node.due_at, "") : "";
   if (startText && dueText) return `${startText} 至 ${dueText}`;
@@ -424,6 +424,12 @@ function getCurrentProcessStageNode() {
   return state.processNodes.find((node) => !isResolvedProcessNode(node, submissionMap, recordMap)) || state.processNodes[state.processNodes.length - 1] || null;
 }
 
+function getAvailableProcessSubmissionNodes() {
+  const currentStageNode = getCurrentProcessStageNode();
+  if (!currentStageNode) return [];
+  return (state.processNodes || []).filter((node) => String(node.node_id) === String(currentStageNode.node_id));
+}
+
 function getProcessSubmissionAvailability(nodeId) {
   const node = (state.processNodes || []).find((item) => String(item.node_id) === String(nodeId));
   if (!node) {
@@ -453,7 +459,7 @@ function getCurrentProcessTodo() {
   if (!availability.allowed) return null;
 
   const detailParts = [];
-  detailParts.push(`提交窗口：${getProcessNodeWindowText(stageNode, "未设置")}`);
+  detailParts.push(`开始与截止时间：${getProcessNodeWindowText(stageNode)}`);
   if (latestStatus === "rejected" && latestSubmission?.reviewComment) {
     detailParts.push(`审批意见：${latestSubmission.reviewComment}`);
   } else if (latestStatus === "draft") {
@@ -520,14 +526,16 @@ function getUnreadNoticeCount() {
 
 function getProcessFormState() {
   const currentNode = getCurrentProcessNode();
+  const availableNodeIds = new Set(getAvailableProcessSubmissionNodes().map((node) => String(node.node_id)));
   const processType = getStudentProcessType();
   const defaultMaterialType = getProcessBaseMaterialOptions(processType)[0];
   const savedMaterialType = state.processForm?.materialType || defaultMaterialType;
+  const savedNodeId = String(state.processForm?.nodeId || "").trim();
   const customMaterialType = isCustomProcessMaterial(savedMaterialType, processType)
     ? savedMaterialType
     : (state.processForm?.customMaterialType || "");
   return {
-    nodeId: state.processForm?.nodeId || currentNode?.id || "",
+    nodeId: savedNodeId && availableNodeIds.has(savedNodeId) ? savedNodeId : (currentNode?.id || ""),
     materialType: savedMaterialType,
     materialTypeSelection: customMaterialType ? "其他" : savedMaterialType,
     customMaterialType,
@@ -1930,7 +1938,7 @@ function renderConsult() {
   const matchedPolicies = filteredPolicies();
   return `
     ${pageHead("智能咨询", "基于政策知识库检索标准问答、附件模板和官方办理渠道。", [
-      ["download-template", "下载模板", "download", "ghost-button"]
+      ["open-template-center", "前往模板下载", "download", "ghost-button"]
     ])}
     <section class="panel">
       <div class="toolbar">
@@ -1990,15 +1998,14 @@ function renderConsult() {
 function renderProcess() {
   const currentNode = getCurrentProcessNode();
   const formState = getProcessFormState();
+  const selectableNodes = getAvailableProcessSubmissionNodes();
   const historyRows = Array.isArray(state.processHistory) ? state.processHistory : [];
   const draftRows = Array.isArray(state.processDrafts) ? state.processDrafts : [];
   const currentProcessType = getStudentProcessType();
   const materialOptions = getProcessMaterialOptions(currentProcessType);
   const selectedNodeAvailability = getProcessSubmissionAvailability(formState.nodeId);
   return `
-    ${pageHead("党团流程", "线性展示入党/入团全过程，支持节点提醒、材料提交和审批退回处理。", [
-      ["submit-material", "提交材料", "upload", "primary-button"]
-    ])}
+    ${pageHead("党团流程", "线性展示入党/入团全过程，支持节点提醒、材料提交和审批退回处理。")}
     <section class="panel">
       <div class="chip-row">
         ${PROCESS_TYPE_OPTIONS.map((item) => `
@@ -2033,9 +2040,15 @@ function renderProcess() {
         <form class="form-grid" data-form="process">
           <label class="field full">
             <span>所属节点</span>
-            <select name="nodeId" required>
-              ${state.processNodes.map((node) => `<option value="${escapeHtml(node.node_id)}" ${String(formState.nodeId) === String(node.node_id) ? "selected" : ""}>${escapeHtml(node.node_name)}${getProcessNodeWindowText(node, "") ? `（${escapeHtml(getProcessNodeWindowText(node, ""))}）` : ""}</option>`).join("")}
-            </select>
+            <input
+              type="text"
+              value="${escapeHtml(selectableNodes.length
+                ? `${selectableNodes[0].node_name}${getProcessNodeWindowText(selectableNodes[0], "") ? `（${getProcessNodeWindowText(selectableNodes[0], "")}）` : ""}`
+                : "当前暂无可提交节点")}"
+              disabled
+              style="background:#f1f5f9;cursor:not-allowed;"
+            />
+            <input type="hidden" name="nodeId" value="${escapeHtml(formState.nodeId)}" />
           </label>
           <label class="field full">
             <span>材料类型</span>
@@ -2054,8 +2067,13 @@ function renderProcess() {
             <textarea name="description" placeholder="补充本次提交说明">${escapeHtml(formState.description)}</textarea>
           </label>
           <label class="field full">
-            <span>提交窗口</span>
-            <input type="text" value="${escapeHtml(getProcessNodeWindowText((state.processNodes || []).find((node) => String(node.node_id) === String(formState.nodeId)), "请选择节点后查看"))}" disabled style="background:#f1f5f9;cursor:not-allowed;" />
+            <span>开始与截止时间</span>
+            <input
+              type="text"
+              value="${escapeHtml(getProcessNodeWindowText(selectableNodes[0], "当前节点未设置开始和截止时间"))}"
+              disabled
+              style="background:#f1f5f9;cursor:not-allowed;"
+            />
           </label>
           ${selectedNodeAvailability.allowed ? "" : `
             <p style="margin:0;color:#b45309;">${escapeHtml(selectedNodeAvailability.message)}</p>
@@ -4264,6 +4282,7 @@ function openQuickSearch() {
 
 function closeModal() {
   const modal = document.getElementById("quickSearchModal");
+  if (!modal) return;
   modal.classList.remove("is-open");
   modal.setAttribute("aria-hidden", "true");
 }
@@ -4465,6 +4484,7 @@ document.addEventListener("click", async (event) => {
     "close-modal": null,
     "policy-search": "已根据关键词刷新知识库匹配结果。",
     "download-template": "请在具体业务模块中选择真实模板或数据文件。",
+    "open-template-center": null,
     "copy-link": "已复制官方渠道说明编号。",
     "student-new-application": "已定位到证明申请表。",
     "submit-material": "请在节点操作区上传材料。",
@@ -4522,6 +4542,16 @@ document.addEventListener("click", async (event) => {
     } catch (error) {
       showToast(error.message);
     }
+    return;
+  }
+  if (action === "open-template-center") {
+    closeModal();
+    state.role = "student";
+    state.studentView = "templates";
+    saveCurrentView();
+    await fetchTemplates();
+    render();
+    showToast("已进入模板下载模块。");
     return;
   }
   if (action === "switch-student-process-type") {
