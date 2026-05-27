@@ -38,6 +38,8 @@ CREATE TABLE policy_item (
     category VARCHAR(50),
     keywords TEXT,
     content TEXT,
+    attachment_name VARCHAR(255),
+    attachment_url TEXT,
     status VARCHAR(20)
 );
 

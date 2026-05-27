@@ -125,45 +125,6 @@ const adminNav = [
   ["training", "培养方案", "chart"]
 ];
 
-const fallbackPolicies = [
-  {
-    title: "在读证明开具说明",
-    category: "证明类",
-    keywords: "证明 在读 电子证明 模板",
-    answer: "学生在线填写用途并提交后，由管理老师审核；通过后系统生成带编号的电子证明，可在申请记录中下载。",
-    owner: "学生事务办公室",
-    updated: "2026-05-10",
-    attachment: "在读证明模板 v1.2"
-  },
-  {
-    title: "党员发展流程常见问题",
-    category: "党团类",
-    keywords: "入党 积极分子 发展对象 思想汇报",
-    answer: "当前阶段需要按节点提交思想汇报、谈话记录和培养联系人意见。逾期节点会触发提醒并进入管理员待办。",
-    owner: "党建办公室",
-    updated: "2026-05-08",
-    attachment: "思想汇报格式说明"
-  },
-  {
-    title: "奖学金材料提交规范",
-    category: "奖助类",
-    keywords: "奖学金 综测 材料 成绩 排名",
-    answer: "奖学金材料需包含申请表、成绩单、证明材料扫描件。系统支持最多 30MB 附件上传，并保留审批记录至少 1 年。",
-    owner: "学生事务办公室",
-    updated: "2026-05-06",
-    attachment: "奖学金申请表"
-  },
-  {
-    title: "宿舍维修与校园安全提醒",
-    category: "生活类",
-    keywords: "宿舍 维修 安全 后勤",
-    answer: "校内官方办理事项以学校平台为准，本平台提供办理说明、材料模板和外链指引，避免重复填报。",
-    owner: "后勤联络员",
-    updated: "2026-04-30",
-    attachment: "宿舍问题登记表"
-  }
-];
-
 const notices = [
   { id: "N-001", title: "就业办：春招信息汇总", target: "毕业生、就业标签", time: "2026-05-16 09:00", unread: true, type: "就业", text: "新增 14 条岗位信息，含校友企业内推与学院专场宣讲。详细岗位信息请查看学院就业群公告。", summary: "新增 14 条岗位信息，含校友企业内推与学院专场宣讲。", tags: ["就业", "毕业生"], attachmentName: "", attachmentData: "" },
   { id: "N-002", title: "党建办：思想汇报提交提醒", target: "入党积极分子", time: "2026-05-15 17:30", unread: true, type: "党团", text: "培养考察节点将在 2026-05-18 到期，请及时上传附件，并按要求填写思想汇报。", summary: "培养考察节点将在 2026-05-18 到期，请及时上传附件。", tags: ["党团", "思想汇报"], attachmentName: "", attachmentData: "" },
@@ -197,7 +158,7 @@ const knowledgeRows = [
   ["成绩分析上传说明", "学业类", "草稿", "2026-05-06"]
 ];
 
-state.policies = fallbackPolicies.map(normalizePolicy);
+state.policies = [];
 
 const planRows = [
   ["计算机类本科培养方案", "2024级", "已发布", "2026-04-15"],
@@ -232,6 +193,16 @@ function apiHeaders(json = false) {
   if (json) headers["Content-Type"] = "application/json";
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   return headers;
+}
+
+function resolveBackendAssetUrl(url) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url) || url.startsWith("data:")) return url;
+  if (/^https?:\/\//i.test(API_BASE_URL)) {
+    const apiUrl = new URL(API_BASE_URL);
+    return `${apiUrl.origin}${url.startsWith("/") ? url : `/${url}`}`;
+  }
+  return url;
 }
 
 function getSessionItem(key) {
@@ -273,18 +244,19 @@ function normalizePolicy(item = {}) {
     title: item.title || item.question || "未命名政策条目",
     category: item.category || "未分类",
     keywords: item.keywords || item.question || "",
-    answer: item.answer || item.content || "暂无标准答复，请联系管理员维护知识库。",
+    answer: item.content || item.answer || "暂无标准答复，请联系管理员维护知识库。",
     content: item.content || item.answer || "",
     owner: item.owner || item.department || "学院学生工作办公室",
     updated: updatedAt ? String(updatedAt).slice(0, 10) : "数据库记录",
-    attachment: item.attachment || item.template_name || "暂无附件",
+    attachment: item.attachment_name || item.attachment || item.template_name || "暂无附件",
+    attachmentUrl: item.attachment_url || item.attachmentUrl || "",
     status: statusText
   };
 }
 
 async function fetchPolicies(options = {}) {
   if (!state.token) {
-    state.policies = fallbackPolicies.map(normalizePolicy);
+    state.policies = [];
     state.policyError = "";
     return state.policies;
   }
@@ -311,7 +283,6 @@ async function fetchPolicies(options = {}) {
     return state.policies;
   } catch (error) {
     state.policyError = error.message;
-    if (!state.policies.length) state.policies = fallbackPolicies.map(normalizePolicy);
     if (!options.silent) showToast(`知识库接口异常：${error.message}`);
     return state.policies;
   } finally {
@@ -2003,7 +1974,9 @@ function renderConsult() {
               </header>
               <p>维护部门：${escapeHtml(item.owner)} · 更新于 ${escapeHtml(item.updated)}</p>
               <div class="toolbar">
-                <button type="button" class="secondary-button" data-action="download-template">${icon("download")}下载</button>
+                ${item.attachmentUrl
+                  ? `<button type="button" class="secondary-button" data-action="download-policy-attachment" data-url="${escapeHtml(item.attachmentUrl)}" data-name="${escapeHtml(item.attachment)}">${icon("download")}下载</button>`
+                  : `<button type="button" class="secondary-button" data-action="download-template">${icon("download")}下载</button>`}
                 <button type="button" class="ghost-button" data-action="copy-link">${icon("file")}官方渠道</button>
               </div>
             </article>
@@ -2827,16 +2800,19 @@ function renderUserManage() {
 }
 
 function renderKnowledgeManage() {
-  const rows = state.policies.length ? state.policies : fallbackPolicies.map(normalizePolicy);
+  const rows = state.policies;
   const editingPolicy = rows.find((row) => row.id === state.editingPolicyId);
   return adminPageWithTable(
     "知识库管理",
     "维护政策条目、标准问答、附件模板与关键词。",
     ["批量导入", "新增条目"],
-    ["标题", "分类", "状态", "更新日期", "操作"],
+    ["标题", "分类", "附件", "状态", "更新日期", "操作"],
     rows.map((row) => [
       escapeHtml(row.title),
       escapeHtml(row.category),
+      row.attachmentUrl
+        ? `<button type="button" class="ghost-button" data-action="download-policy-attachment" data-url="${escapeHtml(row.attachmentUrl)}" data-name="${escapeHtml(row.attachment)}">${icon("download")}${escapeHtml(row.attachment)}</button>`
+        : `<span class="muted-text">暂无附件</span>`,
       badge(escapeHtml(row.status), row.status === "启用" ? "success" : "neutral"),
       escapeHtml(row.updated),
       `<button type="button" class="ghost-button" data-policy-edit="${escapeHtml(row.id)}">编辑</button>`
@@ -2862,6 +2838,11 @@ function renderKnowledgeManage() {
           <label class="field full">
             <span>内容</span>
             <textarea name="content" placeholder="支持录入标准答复、注意事项、官方链接与办理说明。" required>${escapeHtml(editingPolicy?.content || editingPolicy?.answer || "")}</textarea>
+          </label>
+          <label class="field full">
+            <span>附件上传</span>
+            <input name="attachment" type="file" />
+            <small style="color:#64748b;">${escapeHtml(editingPolicy?.attachmentUrl ? `当前附件：${editingPolicy.attachment}` : "支持 PDF、Word、Excel、图片等政策附件，单个文件不超过 30MB。")}</small>
           </label>
           <label class="field full">
             <span>状态</span>
@@ -4108,7 +4089,7 @@ function renderTranscriptTasks() {
 
 function filteredPolicies() {
   const query = state.policyQuery.trim().toLowerCase();
-  return (state.policies.length ? state.policies : fallbackPolicies.map(normalizePolicy)).filter((item) => {
+  return state.policies.filter((item) => {
     const inCategory = state.policyCategory === "全部" || item.category === state.policyCategory;
     const haystack = `${item.title} ${item.category} ${item.keywords} ${item.answer}`.toLowerCase();
     return inCategory && (!query || haystack.includes(query));
@@ -4121,7 +4102,7 @@ function renderPolicyResults(limit) {
     return `<article class="list-card"><h3>正在查询知识库</h3><p>正在从后端同步政策条目，请稍候。</p></article>`;
   }
   if (state.policyError) {
-    return `<article class="list-card is-unread"><h3>接口暂不可用</h3><p>${escapeHtml(state.policyError)}。已保留当前可用数据用于浏览。</p></article>`;
+    return `<article class="list-card is-unread"><h3>接口暂不可用</h3><p>${escapeHtml(state.policyError)}。请检查后端服务或数据库连接。</p></article>`;
   }
   if (!results.length) {
     return `<article class="list-card"><h3>暂无匹配结果</h3><p>请尝试更换关键词，或联系管理员维护知识库。</p></article>`;
@@ -4138,6 +4119,11 @@ function renderPolicyResults(limit) {
         <span>更新于 ${escapeHtml(item.updated)}</span>
         <span>附件：${escapeHtml(item.attachment)}</span>
       </div>
+      ${item.attachmentUrl ? `
+        <div class="toolbar">
+          <button type="button" class="ghost-button" data-action="download-policy-attachment" data-url="${escapeHtml(item.attachmentUrl)}" data-name="${escapeHtml(item.attachment)}">${icon("download")}下载附件</button>
+        </div>
+      ` : ""}
     </article>
   `).join("");
 }
@@ -4286,7 +4272,7 @@ function renderGlobalSearchResults() {
   const input = document.getElementById("globalSearchInput");
   const results = document.getElementById("globalSearchResults");
   const query = input.value.trim().toLowerCase();
-  const source = state.policies.length ? state.policies : fallbackPolicies.map(normalizePolicy);
+  const source = state.policies;
   const matched = source.filter((item) => `${item.title} ${item.keywords} ${item.answer}`.toLowerCase().includes(query));
   results.innerHTML = (query ? matched : source).map((item) => `
     <article class="list-card">
@@ -4516,6 +4502,25 @@ document.addEventListener("click", async (event) => {
     const form = document.querySelector('form[data-form="process"]');
     if (form) {
       form.requestSubmit();
+    }
+    return;
+  }
+  if (action === "download-policy-attachment") {
+    const button = event.target.closest("[data-action]");
+    const fileUrl = resolveBackendAssetUrl(button?.dataset.url || "");
+    const fallbackName = button?.dataset.name || "知识库附件";
+    if (!fileUrl) {
+      showToast("该知识库条目暂无可下载附件。");
+      return;
+    }
+    try {
+      const response = await fetch(fileUrl, { credentials: "same-origin" });
+      if (!response.ok) throw new Error("附件下载失败");
+      const blob = await response.blob();
+      const fileName = parseDownloadFileName(response.headers.get("content-disposition")) || fallbackName;
+      triggerBlobDownload(blob, fileName);
+    } catch (error) {
+      showToast(error.message);
     }
     return;
   }
@@ -5108,6 +5113,7 @@ document.addEventListener("submit", async (event) => {
 
   if (form.dataset.form === "knowledge") {
     const formData = new FormData(form);
+    const attachmentFile = form.querySelector('input[name="attachment"]')?.files?.[0] || null;
     const payload = {
       title: formData.get("title")?.toString().trim(),
       category: formData.get("category")?.toString(),
@@ -5121,6 +5127,14 @@ document.addEventListener("submit", async (event) => {
     if (!payload.title || !payload.keywords || !payload.content) {
       showToast("请完整填写标题、关键词和内容。");
       return;
+    }
+    if (attachmentFile) {
+      if (attachmentFile.size > 30 * 1024 * 1024) {
+        showToast("附件大小不能超过 30MB。");
+        return;
+      }
+      payload.attachmentName = attachmentFile.name;
+      payload.attachmentData = await fileToDataUrl(attachmentFile);
     }
     try {
       await savePolicy(payload);

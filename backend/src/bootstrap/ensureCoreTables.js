@@ -152,6 +152,12 @@ async function ensureCoreTables() {
       ADD COLUMN IF NOT EXISTS read_time TIMESTAMP
   `);
 
+  await db.query(`
+    ALTER TABLE policy_item
+      ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS attachment_url TEXT
+  `);
+
   ensured = true;
 }
 

@@ -1,5 +1,6 @@
 const { Pool } = require('pg');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
 // Kingbase is highly compatible with PostgreSQL, so the 'pg' driver works.
 const pool = new Pool({
