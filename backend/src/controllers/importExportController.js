@@ -1,5 +1,6 @@
 const XLSX = require('xlsx');
 const db = require('../config/db');
+const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 
 let noticeColumnsReady = false;
 
@@ -463,9 +464,12 @@ const IMPORT_EXPORT_TYPES = {
       { key: 'grade', label: '适用年级' },
       { key: 'major', label: '专业方向' },
       { key: 'status', label: '状态' },
+      { key: 'attachmentName', label: '培养方案文件名' },
+      { key: 'attachmentData', label: '培养方案文件内容' },
       { key: 'updatedAt', label: '最近更新' }
     ],
     async exportRows() {
+      await ensureCoreTables();
       const { rows } = await db.query('SELECT * FROM training_plan ORDER BY updated_at DESC');
       return rows.map((row) => ({
         planId: row.plan_id,
@@ -473,10 +477,13 @@ const IMPORT_EXPORT_TYPES = {
         grade: row.grade,
         major: row.major || '',
         status: row.status,
+        attachmentName: row.attachment_name || '',
+        attachmentData: row.attachment_data || '',
         updatedAt: formatDate(row.updated_at)
       }));
     },
     async importRows(rows) {
+      await ensureCoreTables();
       const result = { imported: 0, created: 0, updated: 0, failed: 0, errors: [] };
 
       for (let index = 0; index < rows.length; index += 1) {
@@ -509,16 +516,16 @@ const IMPORT_EXPORT_TYPES = {
             if (existing) {
               await db.query(
                 `UPDATE training_plan
-                 SET name = $1, grade = $2, major = $3, status = $4, updated_at = CURRENT_TIMESTAMP
-                 WHERE plan_id = $5`,
-                [name, grade, row.major || '', normalizeStatus(row.status, 'draft'), existing.plan_id]
+                 SET name = $1, grade = $2, major = $3, status = $4, attachment_name = $5, attachment_data = $6, updated_at = CURRENT_TIMESTAMP
+                 WHERE plan_id = $7`,
+                [name, grade, row.major || '', normalizeStatus(row.status, 'draft'), row.attachmentName || existing.attachment_name || '', row.attachmentData || existing.attachment_data || '', existing.plan_id]
               );
               result.updated += 1;
             } else {
               await db.query(
-                `INSERT INTO training_plan (plan_id, name, grade, major, status, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-                [planId || `PLAN-${Date.now()}-${index}`, name, grade, row.major || '', normalizeStatus(row.status, 'draft')]
+                `INSERT INTO training_plan (plan_id, name, grade, major, status, attachment_name, attachment_data, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+                [planId || `PLAN-${Date.now()}-${index}`, name, grade, row.major || '', normalizeStatus(row.status, 'draft'), row.attachmentName || '', row.attachmentData || '']
               );
               result.created += 1;
             }

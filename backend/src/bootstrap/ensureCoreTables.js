@@ -39,6 +39,8 @@ async function ensureCoreTables() {
       grade VARCHAR(20),
       major VARCHAR(100),
       status VARCHAR(20),
+      attachment_name VARCHAR(255),
+      attachment_data TEXT,
       updated_at TIMESTAMP
     )
   `);
@@ -57,6 +59,12 @@ async function ensureCoreTables() {
       ADD COLUMN IF NOT EXISTS summary TEXT,
       ADD COLUMN IF NOT EXISTS tags TEXT,
       ADD COLUMN IF NOT EXISTS audience_grades TEXT,
+      ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS attachment_data TEXT
+  `);
+
+  await db.query(`
+    ALTER TABLE training_plan
       ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
       ADD COLUMN IF NOT EXISTS attachment_data TEXT
   `);

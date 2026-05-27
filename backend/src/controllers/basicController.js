@@ -200,6 +200,8 @@ function mapPlan(row) {
     major: row.major,
     status: row.status,
     statusName,
+    attachmentName: row.attachment_name || '',
+    attachmentData: row.attachment_data || '',
     updatedAt: formatDate(row.updated_at),
     row: [
       row.name,
@@ -543,18 +545,19 @@ exports.getPlans = async (req, res) => {
 };
 
 exports.createPlan = async (req, res) => {
-  const { name, grade, major, status = 'draft' } = req.body;
+  const { name, grade, major, status = 'draft', attachmentName, attachmentData } = req.body;
   if (!name || !grade) {
     return res.status(400).json({ error: 'Plan name and grade are required' });
   }
 
   try {
+    await ensureCoreTables();
     const planId = `PLAN-${Date.now()}`;
     const { rows } = await db.query(
-      `INSERT INTO training_plan (plan_id, name, grade, major, status, updated_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      `INSERT INTO training_plan (plan_id, name, grade, major, status, attachment_name, attachment_data, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [planId, name, grade, major || '', status]
+      [planId, name, grade, major || '', status, attachmentName || '', attachmentData || '']
     );
     res.status(201).json(mapPlan(rows[0]));
   } catch (err) {
@@ -564,19 +567,22 @@ exports.createPlan = async (req, res) => {
 
 exports.updatePlan = async (req, res) => {
   const { planId } = req.params;
-  const { name, grade, major, status } = req.body;
+  const { name, grade, major, status, attachmentName, attachmentData } = req.body;
 
   try {
+    await ensureCoreTables();
     const { rows } = await db.query(
       `UPDATE training_plan
        SET name = COALESCE($1, name),
            grade = COALESCE($2, grade),
            major = COALESCE($3, major),
            status = COALESCE($4, status),
+           attachment_name = COALESCE($5, attachment_name),
+           attachment_data = COALESCE($6, attachment_data),
            updated_at = CURRENT_TIMESTAMP
-       WHERE plan_id = $5
+       WHERE plan_id = $7
        RETURNING *`,
-      [name, grade, major, status, planId]
+      [name, grade, major, status, attachmentName, attachmentData, planId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Training plan not found' });
     res.json(mapPlan(rows[0]));

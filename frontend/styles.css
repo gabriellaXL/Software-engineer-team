@@ -427,6 +427,11 @@ button {
   border-color: var(--red);
 }
 
+.muted-text {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .ghost-button:hover,
 .secondary-button:hover,
 .icon-button:hover {

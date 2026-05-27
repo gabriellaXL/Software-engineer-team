@@ -37,6 +37,8 @@ async function alterDb() {
         grade VARCHAR(20),
         major VARCHAR(100),
         status VARCHAR(20),
+        attachment_name VARCHAR(255),
+        attachment_data TEXT,
         updated_at TIMESTAMP
       );
 
