@@ -87,7 +87,7 @@ const state = {
 const DEFAULT_NOTICE_TAGS = ["就业", "党团", "后勤", "毕业生", "奖助", "安全", "活动"];
 const STUDENT_NOTICE_FILTER_TAGS = ["全部", ...DEFAULT_NOTICE_TAGS, "其它"];
 const NOTICE_DRAFT_STORAGE_KEY = "sds_notice_drafts";
-const GRADE_OPTIONS = ["大一", "大二", "大三", "大四"];
+const GRADE_OPTIONS = ["24级", "25级", "26级", "27级"];
 const PROCESS_TYPE_OPTIONS = [
   { value: "party", label: "入党流程" },
   { value: "league", label: "入团流程" }
@@ -2247,6 +2247,10 @@ function renderStudentProfile() {
           <input type="text" name="class_name" value="${p.class_name || ''}" placeholder="例如：计科 1 班" />
         </label>
         <label class="field full">
+          <span>专业</span>
+          <input type="text" name="major" value="${p.major || ''}" placeholder="请填写专业全称" />
+        </label>
+        <label class="field full">
           <span>年级</span>
           <select name="grade" required>
             ${GRADE_OPTIONS.map((item) => `<option value="${item}" ${p.grade === item ? "selected" : ""}>${item}</option>`).join("")}
@@ -2744,14 +2748,17 @@ function renderUserManage() {
   const editingUser = userRecords.find((item) => String(item.id || item.user_id) === String(state.editingUserId));
   return adminPageWithTable(
     "用户管理",
-    "统一维护学生、老师与 4 级权限体系。",
-    ["导出名单", "新建用户"],
-    ["账号", "姓名", "角色", "组织/专业", "状态", "操作"],
+    "",
+    ["新建用户"],
+    ["账号", "姓名", "角色", "专业", "年级", "电话", "邮箱", "状态", "操作"],
     userRecords.map((item) => [
       escapeHtml(item.accountId || item.account_id || "-"),
       escapeHtml(item.name || "-"),
       badge(escapeHtml(item.roleName || item.role || "-"), (item.role || "").includes("student") ? "neutral" : "success"),
-      escapeHtml(item.organization || [item.major, item.grade].filter(Boolean).join(" / ") || item.department || "-"),
+      escapeHtml(item.major || "-"),
+      escapeHtml(item.grade || "-"),
+      escapeHtml(item.phone || "-"),
+      escapeHtml(item.email || "-"),
       badge(escapeHtml(item.statusText || item.status || "-"), item.status === "active" ? "success" : "warning"),
       `${actionButton("编辑", "user-edit", item.id || item.user_id)} ${actionButton("删除", "user-delete", item.id || item.user_id)}`
     ]),
@@ -2792,6 +2799,10 @@ function renderUserManage() {
           <label class="field">
             <span>电话</span>
             <input name="phone" type="text" placeholder="请输入联系电话" value="${escapeHtml(editingUser?.phone || "")}" />
+          </label>
+          <label class="field">
+            <span>邮箱</span>
+            <input name="email" type="email" placeholder="请输入邮箱" value="${escapeHtml(editingUser?.email || "")}" />
           </label>
           <label class="field">
             <span>专业</span>
@@ -3618,9 +3629,9 @@ function renderTrainingManage() {
 function adminPageWithTable(title, subtitle, actions, headers, rows, side) {
   return `
     ${pageHead(title, subtitle, [
-      [title + "-secondary", actions[0], actions[0].includes("导") ? "download" : "file", "ghost-button"],
-      [title + "-primary", actions[1], "plus", "primary-button"]
-    ])}
+      actions[0] ? [title + "-secondary", actions[0], actions[0].includes("导") ? "download" : "file", "ghost-button"] : null,
+      actions[1] ? [title + "-primary", actions[1], "plus", "primary-button"] : null
+    ].filter(Boolean))}
     <section class="admin-layout">
       <div class="panel">
         <div class="toolbar" style="margin-bottom:14px">
@@ -4370,6 +4381,11 @@ document.addEventListener("click", async (event) => {
 
   const userEdit = event.target.closest("[data-action='user-edit']");
   if (userEdit) {
+    const targetUser = state.userRecords.find(u => String(u.id || u.user_id) === String(userEdit.dataset.id));
+    if (state.role === "admin" && targetUser && ["admin", "teacher", "leader"].includes(targetUser.role)) {
+      showToast("无权修改管理员/老师/学院领导的账号信息");
+      return;
+    }
     state.editingUserId = userEdit.dataset.id;
     render();
     showToast("已载入该用户，可在右侧表单维护。");
@@ -5272,6 +5288,7 @@ document.addEventListener("submit", async (event) => {
       major: formData.get("major")?.toString().trim(),
       grade: formData.get("grade")?.toString().trim(),
       phone: formData.get("phone")?.toString().trim(),
+      email: formData.get("email")?.toString().trim(),
       department: formData.get("department")?.toString().trim()
     };
     if (!payload.accountId) {

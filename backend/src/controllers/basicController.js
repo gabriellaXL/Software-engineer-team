@@ -182,6 +182,10 @@ function mapUser(row) {
     name: row.name || row.account_id,
     role: row.role,
     roleName,
+    major: row.major || '',
+    grade: row.grade || '',
+    phone: row.phone || '',
+    email: row.email || '',
     organization: row.organization || '-',
     status: row.status,
     statusText: statusToText(row.status),
@@ -189,7 +193,10 @@ function mapUser(row) {
       row.account_id,
       row.name || row.account_id,
       roleName,
-      row.organization || '-',
+      row.major || '-',
+      row.grade || '-',
+      row.phone || '-',
+      row.email || '-',
       statusToText(row.status),
     ],
   };
@@ -393,6 +400,10 @@ exports.getUsers = async (req, res) => {
         u.role,
         u.status,
         COALESCE(sp.name, ap.name) AS name,
+        sp.major,
+        sp.grade,
+        sp.phone,
+        sp.email,
         CASE
           WHEN sp.student_id IS NOT NULL THEN sp.major || ' / ' || sp.grade
           ELSE ap.department
@@ -458,7 +469,7 @@ exports.createUser = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   const { userId } = req.params;
-  const { role, status, password, name, major, grade, phone, department } = req.body;
+  const { role, status, password, name, major, grade, phone, email, department } = req.body;
 
   try {
     await db.query('BEGIN');
@@ -481,9 +492,10 @@ exports.updateUser = async (req, res) => {
        SET name = COALESCE($1, name),
            major = COALESCE($2, major),
            grade = COALESCE($3, grade),
-           phone = COALESCE($4, phone)
-       WHERE user_id = $5`,
-      [name, major, grade, phone, userId]
+           phone = COALESCE($4, phone),
+           email = COALESCE($5, email)
+       WHERE user_id = $6`,
+      [name, major, grade, phone, email, userId]
     );
     await db.query(
       `UPDATE admin_profile

@@ -2,7 +2,7 @@ const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 
 let profileSchemaReady = false;
-const ALLOWED_GRADES = ['大一', '大二', '大三', '大四'];
+const ALLOWED_GRADES = ['24级', '25级', '26级', '27级'];
 
 async function ensureProfileSchema() {
   if (profileSchemaReady) return;
@@ -147,6 +147,7 @@ exports.updateProfile = async (req, res) => {
     if (isStudent) {
       const studentNo = normalizeValue(req.body.student_no ?? req.body.accountId);
       const className = normalizeValue(req.body.class_name ?? req.body.className);
+      const major = normalizeValue(req.body.major);
       const grade = normalizeValue(req.body.grade);
       const idCard = normalizeValue(req.body.id_card);
       const gender = normalizeValue(req.body.gender);
@@ -164,7 +165,7 @@ exports.updateProfile = async (req, res) => {
         return res.status(400).json({ error: '学号不能为空' });
       }
       if (!grade || !ALLOWED_GRADES.includes(grade)) {
-        return res.status(400).json({ error: '年级只能选择大一、大二、大三或大四' });
+        return res.status(400).json({ error: '年级只能选择 24级、25级、26级、27级' });
       }
 
       const { rows: duplicateRows } = await client.query(
@@ -185,14 +186,15 @@ exports.updateProfile = async (req, res) => {
          SET name = $1,
              student_no = $2,
              class_name = $3,
-             grade = $4,
-             phone = $5,
-             email = $6,
-             id_card = $7,
-             gender = $8,
-             join_party_date = $9
-         WHERE user_id = $10`,
-        [name, studentNo, className || '', grade, phone || '', email || '', idCard || '', gender || '', joinPartyDate || null, userId]
+             major = $4,
+             grade = $5,
+             phone = $6,
+             email = $7,
+             id_card = $8,
+             gender = $9,
+             join_party_date = $10
+         WHERE user_id = $11`,
+        [name, studentNo, className || '', major || '', grade, phone || '', email || '', idCard || '', gender || '', joinPartyDate || null, userId]
       );
       await client.query('COMMIT');
       return res.json(await getJoinedProfile(userId, role));
