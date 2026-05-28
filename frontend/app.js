@@ -81,6 +81,7 @@ const state = {
   approvalFilter: "全部",
   mobileMenuOpen: false,
   editingUserId: null,
+  userSearchQuery: "",
   editingPlanId: null,
   planDraftAttachment: null
 };
@@ -2739,13 +2740,31 @@ function renderAdminDashboard() {
 
 function renderUserManage() {
   const userRecords = state.userRecords.length ? state.userRecords : fallbackUserRecords();
+  const userSearchQuery = state.userSearchQuery.trim().toLowerCase();
+  const filteredUserRecords = userRecords.filter((item) => matchesGlobalSearchQuery(
+    userSearchQuery,
+    item.accountId,
+    item.account_id,
+    item.student_no,
+    item.name,
+    item.roleName,
+    item.role,
+    item.major,
+    item.grade,
+    item.phone,
+    item.email,
+    item.statusText,
+    item.status,
+    item.department,
+    item.organization
+  ));
   const editingUser = userRecords.find((item) => String(item.id || item.user_id) === String(state.editingUserId));
   return adminPageWithTable(
     "用户管理",
     "",
     ["新建用户"],
     ["账号", "姓名", "角色", "专业", "年级", "电话", "邮箱", "状态", "操作"],
-    userRecords.map((item) => [
+    filteredUserRecords.map((item) => [
       escapeHtml(item.accountId || item.account_id || "-"),
       escapeHtml(item.name || "-"),
       badge(escapeHtml(item.roleName || item.role || "-"), (item.role || "").includes("student") ? "neutral" : "success"),
@@ -2816,7 +2835,13 @@ function renderUserManage() {
           </div>
         </form>
       </div>
-    `
+    `,
+    {
+      searchTarget: "users",
+      searchValue: state.userSearchQuery,
+      searchPlaceholder: "搜索账号 / 姓名 / 专业 / 年级",
+      emptyText: state.userSearchQuery ? "暂无匹配用户" : "暂无用户数据"
+    }
   );
 }
 
@@ -3628,7 +3653,16 @@ function renderTrainingManage() {
   );
 }
 
-function adminPageWithTable(title, subtitle, actions, headers, rows, side) {
+function adminPageWithTable(title, subtitle, actions, headers, rows, side, options = {}) {
+  const searchTarget = options.searchTarget || "";
+  const searchAttrs = searchTarget
+    ? ` data-admin-table-search="${escapeHtml(searchTarget)}"`
+    : "";
+  const searchButtonAttrs = searchTarget
+    ? ` data-action="admin-table-search" data-search-target="${escapeHtml(searchTarget)}"`
+    : "";
+  const searchValue = options.searchValue || "";
+  const searchPlaceholder = options.searchPlaceholder || "搜索标题 / 姓名 / 学号";
   return `
     ${pageHead(title, subtitle, [
       actions[0] ? [title + "-secondary", actions[0], actions[0].includes("导") ? "download" : "file", "ghost-button"] : null,
@@ -3637,10 +3671,10 @@ function adminPageWithTable(title, subtitle, actions, headers, rows, side) {
     <section class="admin-layout">
       <div class="panel">
         <div class="toolbar" style="margin-bottom:14px">
-          <label class="search-field">${icon("search")}<input type="search" placeholder="搜索标题 / 姓名 / 学号" /></label>
-          <button class="ghost-button" type="button">${icon("search")}查询</button>
+          <label class="search-field">${icon("search")}<input type="search" placeholder="${escapeHtml(searchPlaceholder)}" value="${escapeHtml(searchValue)}"${searchAttrs} /></label>
+          <button class="ghost-button" type="button"${searchButtonAttrs}>${icon("search")}查询</button>
         </div>
-        ${table(headers, rows)}
+        ${table(headers, rows, options.emptyText)}
       </div>
       ${side}
     </section>
@@ -4170,19 +4204,21 @@ function approvalTable() {
   ]));
 }
 
-function table(headers, rows) {
+function table(headers, rows, emptyText = "暂无数据") {
+  const bodyRows = rows.length
+    ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${headers.length}" class="muted-text" style="text-align:center;padding:24px">${escapeHtml(emptyText)}</td></tr>`;
   return `
     <div class="table-wrap">
       <table>
         <thead><tr>${headers.map((head) => `<th>${head}</th>`).join("")}</tr></thead>
         <tbody>
-          ${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}
+          ${bodyRows}
         </tbody>
       </table>
     </div>
   `;
 }
-
 function badge(text, type) {
   return `<span class="badge ${type || ""}">${text}</span>`;
 }
@@ -4581,6 +4617,15 @@ function renderGlobalSearchResults() {
     : `<article class="list-card"><h3>暂无结果</h3><p>请尝试更换关键词，或前往对应模块查看完整内容。</p></article>`;
 }
 
+function runAdminTableSearch(target) {
+  if (target !== "users") return false;
+  const input = document.querySelector('[data-admin-table-search="users"]');
+  state.userSearchQuery = input ? input.value : state.userSearchQuery;
+  render();
+  showToast(state.userSearchQuery.trim() ? "已按关键词筛选用户列表。" : "已显示全部用户。");
+  return true;
+}
+
 document.addEventListener("click", async (event) => {
   const roleButton = event.target.closest("[data-role]");
   if (roleButton && !state.isAuthenticated) {
@@ -4793,6 +4838,10 @@ document.addEventListener("click", async (event) => {
   if (action === "quick-search") {
     openQuickSearch();
     return;
+  }
+  if (action === "admin-table-search") {
+    const target = event.target.closest("[data-action]")?.dataset.searchTarget;
+    if (runAdminTableSearch(target)) return;
   }
   if (action === "go-notices") {
     closeModal();
@@ -5417,6 +5466,12 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("keydown", async (event) => {
+  const adminSearchInput = event.target.closest?.("[data-admin-table-search]");
+  if (adminSearchInput && event.key === "Enter") {
+    event.preventDefault();
+    runAdminTableSearch(adminSearchInput.dataset.adminTableSearch);
+    return;
+  }
   if (event.key !== "Enter" && event.key !== " ") return;
   const noticeCard = event.target.closest?.("[data-notice-id]");
   if (!noticeCard) return;
@@ -5425,6 +5480,9 @@ document.addEventListener("keydown", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-admin-table-search='users']")) {
+    state.userSearchQuery = event.target.value;
+  }
   if (event.target.matches("[data-policy-search]")) {
     state.policyQuery = event.target.value;
   }
