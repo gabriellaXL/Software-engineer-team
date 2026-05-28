@@ -427,6 +427,12 @@ button {
   border-color: var(--red);
 }
 
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .muted-text {
   color: var(--muted);
   font-size: 14px;
@@ -630,6 +636,45 @@ svg {
 .list-card h3 {
   margin: 0;
   font-size: 16px;
+}
+
+.notice-bulk-toolbar {
+  justify-content: flex-end;
+}
+
+.notice-select-control,
+.notice-row-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.notice-select-control {
+  min-height: 38px;
+  color: var(--text);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.notice-select-control input,
+.notice-row-title input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--brand);
+}
+
+.confirm-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.confirm-summary p {
+  margin: 0;
+  color: var(--text);
 }
 
 .list-card p {
