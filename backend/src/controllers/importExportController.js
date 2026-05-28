@@ -3,6 +3,7 @@ const db = require('../config/db');
 const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 
 let noticeColumnsReady = false;
+let policyColumnsReady = false;
 
 async function ensureNoticeColumns() {
   if (noticeColumnsReady) return;
@@ -31,6 +32,49 @@ async function ensureNoticeColumns() {
       ADD COLUMN IF NOT EXISTS attachment_data TEXT;
   `);
   noticeColumnsReady = true;
+}
+
+async function ensurePolicyColumns() {
+  if (policyColumnsReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS policy_item (
+      policy_id VARCHAR(50) PRIMARY KEY,
+      title VARCHAR(200),
+      category VARCHAR(50),
+      keywords TEXT,
+      content TEXT,
+      attachment_name VARCHAR(255),
+      attachment_url TEXT,
+      status VARCHAR(20)
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS qa_pair (
+      qa_id VARCHAR(50) PRIMARY KEY,
+      policy_id VARCHAR(50) REFERENCES policy_item(policy_id),
+      question TEXT,
+      answer TEXT,
+      priority INTEGER
+    )
+  `);
+  await db.query(`
+    ALTER TABLE policy_item
+      ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS attachment_url TEXT
+  `);
+  policyColumnsReady = true;
+}
+
+async function syncPolicyQaPair(policyId, title, keywords, content) {
+  const qaId = `${policyId}-QA`;
+  const question = [title, keywords].filter(Boolean).join(' ');
+  await db.query(
+    `INSERT INTO qa_pair (qa_id, policy_id, question, answer, priority)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (qa_id)
+     DO UPDATE SET question = EXCLUDED.question, answer = EXCLUDED.answer, priority = EXCLUDED.priority`,
+    [qaId, policyId, question, content, 0]
+  );
 }
 
 function buildWorksheetRows(headers, rows) {
@@ -492,6 +536,106 @@ const IMPORT_EXPORT_TYPES = {
       return result;
     }
   },
+  policies: {
+    filenameBase: 'knowledge-policies',
+    headers: [
+      { key: 'policyId', label: '政策ID' },
+      { key: 'title', label: '标题' },
+      { key: 'category', label: '分类' },
+      { key: 'keywords', label: '关键词' },
+      { key: 'content', label: '内容' },
+      { key: 'status', label: '状态' },
+      { key: 'attachmentName', label: '附件名称' },
+      { key: 'attachmentUrl', label: '附件地址' }
+    ],
+    async exportRows() {
+      await ensurePolicyColumns();
+      const { rows } = await db.query('SELECT * FROM policy_item ORDER BY policy_id DESC');
+      return rows.map((row) => ({
+        policyId: row.policy_id,
+        title: row.title,
+        category: row.category,
+        keywords: row.keywords || '',
+        content: row.content || '',
+        status: row.status || 'active',
+        attachmentName: row.attachment_name || '',
+        attachmentUrl: row.attachment_url || ''
+      }));
+    },
+    async importRows(rows) {
+      await ensurePolicyColumns();
+      const result = { imported: 0, created: 0, updated: 0, failed: 0, errors: [] };
+
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
+        const policyId = String(row.policyId || '').trim();
+        const title = String(row.title || '').trim();
+        const category = String(row.category || '').trim() || '证明类';
+        const keywords = String(row.keywords || '').trim();
+        const content = String(row.content || '').trim();
+        const status = normalizeStatus(row.status, 'active');
+        const attachmentName = String(row.attachmentName || '').trim();
+        const attachmentUrl = String(row.attachmentUrl || '').trim();
+
+        if (!title || !keywords || !content) {
+          result.failed += 1;
+          result.errors.push(`第 ${index + 2} 行缺少必填字段：标题、关键词、内容`);
+          continue;
+        }
+
+        try {
+          await runInTransaction(async () => {
+            let existing;
+            if (policyId) {
+              const { rows: existingRows } = await db.query('SELECT * FROM policy_item WHERE policy_id = $1', [policyId]);
+              existing = existingRows[0];
+            }
+            if (!existing) {
+              const { rows: existingRows } = await db.query('SELECT * FROM policy_item WHERE title = $1', [title]);
+              existing = existingRows[0];
+            }
+
+            if (existing) {
+              await db.query(
+                `UPDATE policy_item
+                 SET title = $1, category = $2, keywords = $3, content = $4, status = $5,
+                     attachment_name = $6, attachment_url = $7
+                 WHERE policy_id = $8`,
+                [
+                  title,
+                  category,
+                  keywords,
+                  content,
+                  status,
+                  attachmentName || existing.attachment_name || null,
+                  attachmentUrl || existing.attachment_url || null,
+                  existing.policy_id
+                ]
+              );
+              await syncPolicyQaPair(existing.policy_id, title, keywords, content);
+              result.updated += 1;
+            } else {
+              const newPolicyId = policyId || `POL-${Date.now()}-${index}`;
+              await db.query(
+                `INSERT INTO policy_item
+                 (policy_id, title, category, keywords, content, status, attachment_name, attachment_url)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [newPolicyId, title, category, keywords, content, status, attachmentName || null, attachmentUrl || null]
+              );
+              await syncPolicyQaPair(newPolicyId, title, keywords, content);
+              result.created += 1;
+            }
+            result.imported += 1;
+          });
+        } catch (error) {
+          result.failed += 1;
+          result.errors.push(`第 ${index + 2} 行导入失败：${error.message}`);
+        }
+      }
+
+      return result;
+    }
+  },
   plans: {
     filenameBase: 'training-plans',
     headers: [
@@ -592,7 +736,9 @@ function rowsFromCsv(labels, rows, config) {
   return rows.map((values) => {
     const row = {};
     config.headers.forEach((header) => {
-      const index = labels.indexOf(header.label);
+      const labelIndex = labels.indexOf(header.label);
+      const keyIndex = labels.indexOf(header.key);
+      const index = labelIndex >= 0 ? labelIndex : keyIndex;
       row[header.key] = index >= 0 ? (values[index] || '').trim() : '';
     });
     return row;
