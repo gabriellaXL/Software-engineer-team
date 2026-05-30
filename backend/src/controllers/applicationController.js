@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { Blob } = require('buffer');
 
 exports.submitApplication = async (req, res) => {
   const { type, content } = req.body;
@@ -189,16 +190,16 @@ exports.convertDocxToPdf = async (req, res) => {
 
     // 2. Prepare FormData for Gotenberg
     const fileId = crypto.randomUUID();
-    const file = new File([docxBuffer], `${fileId}.docx`, { 
-      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+    const file = new Blob([docxBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     });
     const formData = new FormData();
-    formData.append('files', file);
+    formData.append('files', file, `${fileId}.docx`);
 
     // 3. Call Gotenberg API
     // Note: Gotenberg's default port is 3000, which conflicts with this Node app.
     // Assuming Gotenberg is mapped to port 3001 or specified via GOTENBERG_URL env var.
-    const gotenbergUrl = process.env.GOTENBERG_URL || 'http://localhost:3001';
+    const gotenbergUrl = (process.env.GOTENBERG_URL || 'http://localhost:3001').replace(/\/$/, '');
     
     const response = await fetch(`${gotenbergUrl}/forms/libreoffice/convert`, {
       method: 'POST',
