@@ -1,10 +1,56 @@
 const db = require('../config/db');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { Blob } = require('buffer');
+
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function convertWithLibreOffice(docxBuffer) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sds-docx-'));
+  const inputPath = path.join(tempDir, 'input.docx');
+  const outputPath = path.join(tempDir, 'input.pdf');
+
+  try {
+    fs.writeFileSync(inputPath, docxBuffer);
+    const convertArgs = [
+      '--headless',
+      '--convert-to',
+      'pdf',
+      '--outdir',
+      tempDir,
+      inputPath
+    ];
+
+    try {
+      await runCommand('libreoffice', convertArgs, { timeout: 60000 });
+    } catch (error) {
+      await runCommand('soffice', convertArgs, { timeout: 60000 });
+    }
+
+    if (!fs.existsSync(outputPath)) {
+      throw new Error('LibreOffice did not produce a PDF file');
+    }
+
+    return fs.readFileSync(outputPath);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
 
 exports.submitApplication = async (req, res) => {
   const { type, content } = req.body;
@@ -201,19 +247,25 @@ exports.convertDocxToPdf = async (req, res) => {
     // Assuming Gotenberg is mapped to port 3001 or specified via GOTENBERG_URL env var.
     const gotenbergUrl = (process.env.GOTENBERG_URL || 'http://localhost:3001').replace(/\/$/, '');
     
-    const response = await fetch(`${gotenbergUrl}/forms/libreoffice/convert`, {
-      method: 'POST',
-      body: formData
-    });
+    let pdfBuffer;
+    try {
+      const response = await fetch(`${gotenbergUrl}/forms/libreoffice/convert`, {
+        method: 'POST',
+        body: formData
+      });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gotenberg returned ${response.status}: ${errText}`);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Gotenberg returned ${response.status}: ${errText}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      pdfBuffer = Buffer.from(arrayBuffer);
+    } catch (gotenbergError) {
+      console.warn('Gotenberg conversion failed, trying LibreOffice fallback:', gotenbergError.message);
+      pdfBuffer = await convertWithLibreOffice(docxBuffer);
     }
 
-    // 4. Parse PDF response
-    const arrayBuffer = await response.arrayBuffer();
-    const pdfBuffer = Buffer.from(arrayBuffer);
     const pdfBase64 = `data:application/pdf;base64,${pdfBuffer.toString('base64')}`;
 
     // 5. Return PDF

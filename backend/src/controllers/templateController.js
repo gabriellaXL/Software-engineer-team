@@ -8,6 +8,13 @@ function ensureTemplatesDir() {
   return templatesDir;
 }
 
+function templateFileExists(fileUrl) {
+  if (!fileUrl || !fileUrl.startsWith('/uploads/templates/')) return false;
+  const templatesDir = ensureTemplatesDir();
+  const fileName = fileUrl.replace('/uploads/templates/', '');
+  return fs.existsSync(path.join(templatesDir, fileName));
+}
+
 function decodeDataUrl(dataUrl) {
   const match = String(dataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
   if (!match) {
@@ -52,7 +59,7 @@ exports.uploadTemplate = async (req, res) => {
 exports.getTemplates = async (req, res) => {
   try {
     const { rows } = await db.query('SELECT template_id as id, name, type, file_url, version FROM template_file ORDER BY template_id DESC');
-    res.json(rows);
+    res.json(rows.filter((row) => templateFileExists(row.file_url)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
