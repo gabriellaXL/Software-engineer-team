@@ -4252,6 +4252,7 @@ async function bootstrapSession() {
 
     await fetchPolicies({ silent: true, keyword: "", category: "全部" });
     await fetchBasicData({ silent: true });
+    await fetchApplications();
     if (state.role !== "student" && state.role !== "student_leader" && state.adminView === "processConfig") {
       await fetchAdminProcessNodes({ silent: true });
       await fetchProcessReviews({ silent: true });

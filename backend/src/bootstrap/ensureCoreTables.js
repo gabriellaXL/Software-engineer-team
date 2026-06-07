@@ -111,6 +111,38 @@ async function ensureCoreTables() {
   `);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS application (
+      application_id VARCHAR(50) PRIMARY KEY,
+      student_id VARCHAR(50) REFERENCES student_profile(student_id),
+      type VARCHAR(100),
+      content TEXT,
+      submit_time TIMESTAMP,
+      status VARCHAR(20)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS approval_record (
+      approval_id VARCHAR(50) PRIMARY KEY,
+      application_id VARCHAR(50) REFERENCES application(application_id),
+      approver_id VARCHAR(50) REFERENCES admin_profile(admin_id),
+      result VARCHAR(20),
+      comment TEXT,
+      approval_time TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS certificate (
+      certificate_id VARCHAR(50) PRIMARY KEY,
+      application_id VARCHAR(50) REFERENCES application(application_id),
+      template_id VARCHAR(50) REFERENCES template_file(template_id),
+      file_url VARCHAR(255),
+      status VARCHAR(20)
+    )
+  `);
+
+  await db.query(`
     ALTER TABLE party_process_node
       ADD COLUMN IF NOT EXISTS process_type VARCHAR(50),
       ADD COLUMN IF NOT EXISTS node_name VARCHAR(100),
@@ -157,6 +189,18 @@ async function ensureCoreTables() {
     ALTER TABLE training_plan
       ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255),
       ADD COLUMN IF NOT EXISTS attachment_data TEXT
+  `);
+
+  await db.query(`
+    ALTER TABLE application
+      ADD COLUMN IF NOT EXISTS content TEXT,
+      ADD COLUMN IF NOT EXISTS submit_time TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20)
+  `);
+
+  await db.query(`
+    ALTER TABLE application
+      ALTER COLUMN type TYPE VARCHAR(100)
   `);
 
   await db.query(`
