@@ -446,7 +446,7 @@ function getProcessSubmissionAvailability(nodeId) {
     return { allowed: false, message: `该节点尚未到开始时间，需从 ${formatProcessDate(node.start_at || node.scheduled_at, "未设置")} 起才能提交。` };
   }
   if (dueAt && now > dueAt) {
-    return { allowed: false, message: `该节点已超过截止时间 ${formatProcessDate(node.due_at, "未设置")}，当前不可提交。` };
+    return { allowed: false, message: `该节点已超过截止时间 ${formatProcessDate(node.due_at, "未设置")}，当前不可提交，但仍可保存草稿。` };
   }
   return { allowed: true, message: "" };
 }
@@ -978,6 +978,27 @@ async function saveUserRecord(payload) {
   return data;
 }
 
+function isValidEmailValue(value) {
+  const text = String(value || "").trim();
+  return !text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
+function isValidPhoneValue(value) {
+  if (value == null) return true;
+  const text = String(value).trim();
+  return !text || /^\d{11}$/.test(text);
+}
+
+function validatePhoneEmailFields({ phone, email }) {
+  if (!isValidPhoneValue(phone)) {
+return "手机号格式不正确，请输入 11 位数字。";
+  }
+  if (!isValidEmailValue(email)) {
+    return "邮箱格式不正确，请输入正确的邮箱地址。";
+  }
+  return "";
+}
+
 async function deleteUserRecord(userId) {
   const response = await fetch(`${API_BASE_URL}/basic/users/${encodeURIComponent(userId)}`, {
     method: "DELETE",
@@ -1121,15 +1142,16 @@ async function login(accountId, password, role) {
 async function fetchProfile() {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/profile`, {
-      headers: {
-        'Authorization': `Bearer ${state.token}`
-      }
+      headers: apiHeaders()
     });
-    if (response.ok) {
-      state.userProfile = await response.json();
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || '个人信息加载失败');
     }
+    state.userProfile = await response.json();
   } catch (error) {
     console.error('Failed to fetch profile', error);
+    showToast('个人信息加载失败: ' + error.message);
   }
 }
 
@@ -2297,7 +2319,7 @@ function renderStudentProfile() {
         </label>
         <label class="field full">
           <span>电话号码</span>
-          <input type="tel" name="phone" value="${p.phone || ''}" />
+          <input type="tel" name="phone" inputmode="numeric" maxlength="11" placeholder="请输入 11 位手机号码" value="${p.phone || ''}" />
         </label>
         <label class="field full">
           <span>邮箱</span>
@@ -2408,6 +2430,11 @@ window.handleUpdateProfile = async function(event) {
   const form = event.target;
   const formData = new FormData(form);
   const payload = Object.fromEntries(formData.entries());
+  const contactError = validatePhoneEmailFields(payload);
+  if (contactError) {
+    showToast(contactError);
+    return;
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/auth/profile`, {
@@ -2855,7 +2882,7 @@ function renderUserManage() {
           </label>
           <label class="field">
             <span>电话</span>
-            <input name="phone" type="text" placeholder="请输入联系电话" value="${escapeHtml(editingUser?.phone || "")}" />
+            <input name="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="请输入 11 位手机号码" value="${escapeHtml(editingUser?.phone || "")}" />
           </label>
           <label class="field">
             <span>邮箱</span>
@@ -5283,11 +5310,6 @@ document.addEventListener("click", async (event) => {
       showToast("请选择“其他”时请补充具体材料名称。");
       return;
     }
-    const availability = getProcessSubmissionAvailability(nodeId);
-    if (!availability.allowed) {
-      showToast(availability.message);
-      return;
-    }
     try {
       const response = await fetch(`${API_BASE_URL}/process/submissions`, {
         method: "POST",
@@ -5620,6 +5642,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "edit-profile") {
+    await fetchProfile();
     if (state.role === "student" || state.role === "student_leader") {
       state.studentView = "applications";
       state.studentAppView = "profile";
@@ -5632,6 +5655,7 @@ document.addEventListener("click", async (event) => {
   if (action === "student-edit-profile") {
     state.studentView = "applications";
     state.studentAppView = "profile";
+    await fetchProfile();
     render();
     return;
   }
@@ -6011,6 +6035,11 @@ document.addEventListener("submit", async (event) => {
     if (state.editingUserId && !payload.password) {
       delete payload.password;
     }
+    const contactError = validatePhoneEmailFields(payload);
+    if (contactError) {
+      showToast(contactError);
+      return;
+    }
     try {
       await saveUserRecord(payload);
       await fetchBasicData({ silent: true });
@@ -6098,7 +6127,11 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
-  showToast(form.dataset.form === "application" ? "申请已提交，状态更新为待审核。" : "内容已保存。");
+  // 已由独立的提交处理器（如 handleUpdateProfile / handleNewApplicationSubmit）处理了各自表单的 toast 显示
+  if (["student-profile", "admin-profile", "change-password", "application-new", "admin-template"].includes(form.dataset.form || "")) {
+    return;
+  }
+  showToast("内容已保存。");
 });
 
 document.addEventListener("keydown", (event) => {

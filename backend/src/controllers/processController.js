@@ -499,11 +499,13 @@ exports.saveProcessSubmission = async (req, res) => {
     const now = Date.now();
     const startTime = node.start_at || node.scheduled_at ? new Date(node.start_at || node.scheduled_at).getTime() : null;
     const dueTime = node.due_at ? new Date(node.due_at).getTime() : null;
-    if (startTime && now < startTime) {
-      return res.status(400).json({ error: '当前未到该节点开始时间，暂不可提交' });
-    }
-    if (dueTime && now > dueTime) {
-      return res.status(400).json({ error: '当前已超过该节点截止时间，暂不可提交' });
+    if (normalizedStatus === 'pending') {
+      if (startTime && now < startTime) {
+        return res.status(400).json({ error: '当前未到该节点开始时间，暂不可提交' });
+      }
+      if (dueTime && now > dueTime) {
+        return res.status(400).json({ error: '当前已超过该节点截止时间，暂不可提交' });
+      }
     }
 
     await client.query('BEGIN');

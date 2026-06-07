@@ -4,27 +4,60 @@ const jwt = require('jsonwebtoken');
 let profileSchemaReady = false;
 const ALLOWED_GRADES = ['24级', '25级', '26级', '27级'];
 
+function isValidEmailValue(value) {
+  const text = String(value || '').trim();
+  return !text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
+function isValidPhoneValue(value) {
+  if (value == null) return true;
+  const text = String(value).trim();
+  return !text || /^\d{11}$/.test(text);
+}
+
 async function ensureProfileSchema() {
   if (profileSchemaReady) return;
   await db.query(`
-    ALTER TABLE student_profile
-      ADD COLUMN IF NOT EXISTS grade VARCHAR(20),
-      ADD COLUMN IF NOT EXISTS class_name VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS email VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS id_card VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS gender VARCHAR(20),
-      ADD COLUMN IF NOT EXISTS join_party_date DATE;
+    CREATE TABLE IF NOT EXISTS tb_user (
+      user_id VARCHAR(50) PRIMARY KEY,
+      role VARCHAR(50),
+      account_id VARCHAR(50) UNIQUE,
+      password VARCHAR(100),
+      status VARCHAR(20)
+    );
 
-    ALTER TABLE admin_profile
-      ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
-      ADD COLUMN IF NOT EXISTS email VARCHAR(100);
+    CREATE TABLE IF NOT EXISTS student_profile (
+      student_id VARCHAR(50) PRIMARY KEY,
+      user_id VARCHAR(50) REFERENCES tb_user(user_id),
+      student_no VARCHAR(50),
+      name VARCHAR(50),
+      major VARCHAR(100),
+      grade VARCHAR(20),
+      class_name VARCHAR(100),
+      phone VARCHAR(20),
+      email VARCHAR(100),
+      id_card VARCHAR(50),
+      gender VARCHAR(20),
+      join_party_date DATE
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_profile (
+      admin_id VARCHAR(50) PRIMARY KEY,
+      user_id VARCHAR(50) REFERENCES tb_user(user_id),
+      name VARCHAR(50),
+      department VARCHAR(100),
+      role VARCHAR(50),
+      phone VARCHAR(20),
+      email VARCHAR(100)
+    );
   `);
   profileSchemaReady = true;
 }
 
 function normalizeValue(value) {
   if (value === undefined || value === null) return null;
-  return String(value).trim();
+  const trimmed = String(value).trim();
+  return trimmed || null;
 }
 
 async function getJoinedProfile(userId, role) {
@@ -143,6 +176,13 @@ exports.updateProfile = async (req, res) => {
     const name = normalizeValue(req.body.name);
     const phone = normalizeValue(req.body.phone);
     const email = normalizeValue(req.body.email);
+
+    if (!isValidPhoneValue(phone)) {
+return res.status(400).json({ error: '手机号格式不正确，请输入 11 位数字' });
+    }
+    if (!isValidEmailValue(email)) {
+      return res.status(400).json({ error: '邮箱格式不正确，请输入正确的邮箱地址' });
+    }
 
     if (isStudent) {
       const studentNo = normalizeValue(req.body.student_no ?? req.body.accountId);

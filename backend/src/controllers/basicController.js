@@ -4,6 +4,17 @@ const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 let noticeSchemaReady = false;
 const ALL_GRADE_OPTIONS = ['大一', '大二', '大三', '大四'];
 
+function isValidEmailValue(value) {
+  const text = String(value || '').trim();
+  return !text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
+function isValidPhoneValue(value) {
+  if (value == null) return true;
+  const text = String(value).trim();
+  return !text || /^\d{11}$/.test(text);
+}
+
 async function ensureNoticeSchema() {
   if (noticeSchemaReady) return;
   await db.query(`
@@ -430,11 +441,18 @@ exports.createUser = async (req, res) => {
     major,
     grade,
     phone,
+    email,
     department,
   } = req.body;
   const resolvedAccountId = accountId || accountIdAlias;
   if (!resolvedAccountId || !password) {
     return res.status(400).json({ error: 'Account and password are required' });
+  }
+  if (!isValidPhoneValue(phone)) {
+    return res.status(400).json({ error: '手机号格式不正确，请输入 11 位数字' });
+  }
+  if (!isValidEmailValue(email)) {
+    return res.status(400).json({ error: '邮箱格式不正确，请输入正确的邮箱地址' });
   }
 
   const userId = `U-${Date.now()}`;
@@ -448,14 +466,14 @@ exports.createUser = async (req, res) => {
     if (role === 'student' || role === 'student_leader') {
       const studentId = `S-${Date.now()}`;
       await db.query(
-        'INSERT INTO student_profile (student_id, user_id, student_no, name, major, grade, phone) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [studentId, userId, resolvedAccountId, name || resolvedAccountId, major || '', grade || '', phone || '']
+        'INSERT INTO student_profile (student_id, user_id, student_no, name, major, grade, phone, email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [studentId, userId, resolvedAccountId, name || resolvedAccountId, major || '', grade || '', phone || '', email || '']
       );
     } else {
       const adminId = `A-${Date.now()}`;
       await db.query(
-        'INSERT INTO admin_profile (admin_id, user_id, name, department, role) VALUES ($1, $2, $3, $4, $5)',
-        [adminId, userId, name || resolvedAccountId, department || '', role]
+        'INSERT INTO admin_profile (admin_id, user_id, name, department, role, phone, email) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [adminId, userId, name || resolvedAccountId, department || '', role, phone || '', email || '']
       );
     }
 
@@ -470,6 +488,13 @@ exports.createUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   const { userId } = req.params;
   const { role, status, password, name, major, grade, phone, email, department } = req.body;
+
+  if (!isValidPhoneValue(phone)) {
+    return res.status(400).json({ error: '手机号格式不正确，请输入 11 位数字' });
+  }
+  if (!isValidEmailValue(email)) {
+    return res.status(400).json({ error: '邮箱格式不正确，请输入正确的邮箱地址' });
+  }
 
   try {
     await db.query('BEGIN');
