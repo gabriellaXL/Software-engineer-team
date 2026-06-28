@@ -64,6 +64,7 @@ const state = {
   analysisResult: null,
   isAnalysisLoading: false,
   analysisError: "",
+  analysisGrade: getSessionItem("sds_analysis_grade") || "24级",
   applications: [],
   notices: [],
   noticeError: "",
@@ -92,6 +93,7 @@ const DEFAULT_NOTICE_TAGS = ["就业", "党团", "后勤", "毕业生", "奖助"
 const STUDENT_NOTICE_FILTER_TAGS = ["全部", ...DEFAULT_NOTICE_TAGS, "其它"];
 const NOTICE_DRAFT_STORAGE_KEY = "sds_notice_drafts";
 const GRADE_OPTIONS = ["24级", "25级", "26级", "27级"];
+const ANALYSIS_GRADE_OPTIONS = ["24级", "25级"];
 const PROCESS_TYPE_OPTIONS = [
   { value: "party", label: "入党流程" },
   { value: "league", label: "入团流程" }
@@ -230,6 +232,7 @@ function clearSessionState() {
   removeSessionItem('sds_student_process_type');
   removeSessionItem('sds_admin_process_type');
   removeSessionItem('sds_last_transcript_id');
+  removeSessionItem('sds_analysis_grade');
 }
 
 function saveCurrentView() {
@@ -363,6 +366,26 @@ function getProcessBaseMaterialOptions(processType) {
 
 function getProcessMaterialOptions(processType) {
   return [...getProcessBaseMaterialOptions(processType), "其他"];
+}
+
+function normalizeAnalysisGrade(value) {
+  const text = String(value || "").trim();
+  if (/2024|24级|24/.test(text)) return "24级";
+  if (/2025|25级|25/.test(text)) return "25级";
+  return ANALYSIS_GRADE_OPTIONS.includes(text) ? text : "";
+}
+
+function getAnalysisGrade() {
+  const normalized = normalizeAnalysisGrade(state.analysisGrade);
+  return normalized || "24级";
+}
+
+function isPublishedPlan(plan) {
+  return !plan.status || plan.status === "published" || plan.statusName === "已发布";
+}
+
+function isPlanForAnalysisGrade(plan, grade = getAnalysisGrade()) {
+  return normalizeAnalysisGrade(plan?.grade) === normalizeAnalysisGrade(grade);
 }
 
 function isCustomProcessMaterial(value, processType) {
@@ -707,6 +730,10 @@ async function waitForAnalysisResult(transcriptId) {
 async function uploadTranscriptFile(file) {
   if (!state.token) throw new Error("请先登录后再上传成绩单");
   if (!file) throw new Error("请选择需要上传的成绩单文件");
+  const selectedGrade = getAnalysisGrade();
+  if (!ANALYSIS_GRADE_OPTIONS.includes(selectedGrade)) {
+    throw new Error("请先选择你是 24级 还是 25级本科生");
+  }
 
   state.role = "student";
   state.studentView = "analysis";
@@ -714,6 +741,7 @@ async function uploadTranscriptFile(file) {
 
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("grade", selectedGrade);
 
   state.isAnalysisLoading = true;
   state.analysisError = "";
@@ -731,6 +759,8 @@ async function uploadTranscriptFile(file) {
 
     state.transcriptTask = data;
     state.transcriptId = data.transcript_id;
+    state.analysisGrade = selectedGrade;
+    setSessionItem("sds_analysis_grade", selectedGrade);
     setSessionItem('sds_last_transcript_id', data.transcript_id);
     state.studentView = "analysis";
     saveCurrentView();
@@ -2577,8 +2607,12 @@ function renderNewApplication() {
 function renderAnalysis() {
   const hasAnalysisResult = !!state.analysisResult;
   const analysisCredits = hasAnalysisResult ? getAnalysisCredits() : [];
+  const selectedGrade = getAnalysisGrade();
   const publishedPlans = state.planRecords
-    .filter((item) => !item.status || item.status === "published" || item.statusName === "已发布");
+    .filter((item) => isPublishedPlan(item) && isPlanForAnalysisGrade(item, selectedGrade));
+  const matchedPlan = state.analysisResult?.plan || state.transcriptTask?.matched_plan || publishedPlans[0] || null;
+  const resultGrade = state.analysisResult?.selected_grade || state.transcriptTask?.selected_grade || selectedGrade;
+  const requirementSource = state.analysisResult?.requirement_source || state.transcriptTask?.requirement_source || "";
   return `
     ${pageHead("成绩分析", "上传成绩单后与培养方案自动比对，生成缺失模块、学分达成度和选课建议。", [
       ["upload-transcript", "上传成绩单", "upload", "primary-button"]
@@ -2587,40 +2621,85 @@ function renderAnalysis() {
       <div class="panel">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">成绩单解析</p>
-            <h2>文件上传</h2>
-            <p>支持 Excel / CSV / PDF，单次文件不超过 30MB。</p>
+            <p class="eyebrow">第一步</p>
+            <h2>选择本科年级</h2>
+            <p>系统会根据所选年级检索对应培养方案，再进行成绩单学分比对。</p>
           </div>
         </div>
-        <div class="import-drop">
-          ${icon("upload")}
-          <strong>拖拽文件到此处或选择文件</strong>
-          <p>解析失败时可转入人工核对申请。</p>
-          <input id="transcriptFileInput" type="file" accept=".pdf,.csv,.xls,.xlsx" hidden />
-          <button type="button" class="secondary-button" data-action="upload-transcript">${icon("upload")}选择文件</button>
-          ${state.transcriptTask ? `<p>Transcript ID: ${escapeHtml(state.transcriptTask.transcript_id || "")}</p>` : ""}
-          ${state.isAnalysisLoading ? `<p>成绩单正在上传或解析，请稍候。</p>` : ""}
-          ${state.analysisError ? `<p class="danger-text">${escapeHtml(state.analysisError)}</p>` : ""}
+        <div class="analysis-grade-picker" role="radiogroup" aria-label="选择本科年级">
+          ${ANALYSIS_GRADE_OPTIONS.map((grade) => `
+            <button
+              type="button"
+              class="chip ${selectedGrade === grade ? "is-active" : ""}"
+              data-action="select-analysis-grade"
+              data-grade="${escapeHtml(grade)}"
+              aria-pressed="${selectedGrade === grade ? "true" : "false"}"
+            >${escapeHtml(grade)}本科生</button>
+          `).join("")}
+        </div>
+        <div class="analysis-plan-summary">
+          <strong>${matchedPlan ? escapeHtml(matchedPlan.name || "已匹配培养方案") : `${escapeHtml(selectedGrade)}暂无已发布培养方案`}</strong>
+          <p>${matchedPlan
+            ? escapeHtml([matchedPlan.major, matchedPlan.grade || resultGrade].filter(Boolean).join(" / ") || "适用范围未填写")
+            : "管理员发布对应年级培养方案后，系统会优先使用方案中的课程规则；当前仍可使用内置规则完成演示分析。"}</p>
+          ${requirementSource === "default" ? `<span class="badge warning">使用内置规则</span>` : matchedPlan ? `<span class="badge success">已匹配方案</span>` : `<span class="badge warning">待维护方案</span>`}
         </div>
       </div>
       <div class="panel">
         <div class="panel-head">
           <div>
+            <p class="eyebrow">第二步</p>
+            <h2>上传成绩单</h2>
+            <p>支持 CSV / Excel，表头建议包含课程名称、学分、成绩、课程模块。</p>
+          </div>
+        </div>
+        <div class="import-drop">
+          ${icon("upload")}
+          <strong>拖拽文件到此处或选择文件</strong>
+          <p>将以 ${escapeHtml(selectedGrade)} 培养方案规则进行比对，PDF 暂需转为表格文件后上传。</p>
+          <input id="transcriptFileInput" type="file" accept=".csv,.xls,.xlsx" hidden />
+          <button type="button" class="secondary-button" data-action="upload-transcript">${icon("upload")}选择成绩单文件</button>
+          ${state.transcriptTask ? `<p>Transcript ID: ${escapeHtml(state.transcriptTask.transcript_id || "")}</p>` : ""}
+          ${state.isAnalysisLoading ? `<p>成绩单正在上传或解析，请稍候。</p>` : ""}
+          ${state.analysisError ? `<p class="danger-text">${escapeHtml(state.analysisError)}</p>` : ""}
+        </div>
+      </div>
+    </section>
+    <section class="grid two" style="margin-top:14px">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
             <p class="eyebrow">学分达成度</p>
             <h2>${hasAnalysisResult ? "培养方案学分达成" : "暂无学分数据"}</h2>
+            ${hasAnalysisResult ? `<p>${escapeHtml(resultGrade)} · ${escapeHtml(state.analysisResult?.plan?.name || matchedPlan?.name || "培养方案规则")}</p>` : ""}
           </div>
         </div>
         ${hasAnalysisResult ? `<div class="credit-grid">
           ${analysisCredits.map((item) => creditRow(item)).join("")}
         </div>` : `<p class="muted-text" style="padding:12px 0">上传成绩单后可查看各模块学分达成情况。</p>`}
       </div>
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">解析摘要</p>
+            <h2>${hasAnalysisResult ? "本次分析依据" : "等待成绩单"}</h2>
+          </div>
+        </div>
+        ${hasAnalysisResult ? `
+          <div class="analysis-metrics">
+            <article><strong>${escapeHtml(state.analysisResult.selected_grade || selectedGrade)}</strong><span>选择年级</span></article>
+            <article><strong>${Number(state.analysisResult.parsed_course_count || 0)}</strong><span>识别课程</span></article>
+            <article><strong>${Number(state.analysisResult.parsed_total_credits || 0)}</strong><span>通过学分</span></article>
+          </div>
+        ` : `<p class="muted-text" style="padding:12px 0">请先选择年级并上传 CSV / Excel 成绩单。</p>`}
+      </div>
     </section>
     <section class="panel" style="margin-top:14px">
       <div class="panel-head">
         <div>
           <p class="eyebrow">培养方案查看</p>
-          <h2>可下载培养方案</h2>
-          <p>学生可在成绩分析前查看本年级、专业对应的培养方案文件。</p>
+          <h2>${escapeHtml(selectedGrade)}可下载培养方案</h2>
+          <p>这里只展示当前所选年级已发布的培养方案，便于先核对再上传成绩单。</p>
         </div>
       </div>
       <div class="template-list">
@@ -4301,8 +4380,9 @@ function getAnalysisCredits() {
 function renderTranscriptTasks() {
   if (state.transcriptTask) {
     const status = state.analysisResult ? badge("解析成功", "success") : badge(state.isAnalysisLoading ? "解析中" : "待解析", "warning");
-    return table(["任务号", "上传时间", "状态", "结果"], [[
+    return table(["任务号", "年级", "上传时间", "状态", "结果"], [[
       state.transcriptTask.transcript_id || "-",
+      state.transcriptTask.selected_grade || getAnalysisGrade(),
       String(state.transcriptTask.upload_time || "").slice(0, 10) || "-",
       status,
       state.analysisResult ? "1 个建议" : "等待结果"
@@ -5695,6 +5775,18 @@ document.addEventListener("click", async (event) => {
     await fetchPolicies({ silent: false, renderBefore: true });
     render();
     showToast(state.policyError ? "已显示当前可用知识库数据。" : "已根据关键词刷新知识库匹配结果。");
+    return;
+  }
+  if (action === "select-analysis-grade") {
+    const grade = normalizeAnalysisGrade(event.target.closest("[data-action]")?.dataset.grade);
+    if (!grade) return;
+    state.analysisGrade = grade;
+    state.analysisResult = null;
+    state.transcriptTask = null;
+    state.analysisError = "";
+    setSessionItem("sds_analysis_grade", grade);
+    render();
+    showToast(`已切换为${grade}本科生培养方案检索。`);
     return;
   }
   if (action === "upload-transcript") {
