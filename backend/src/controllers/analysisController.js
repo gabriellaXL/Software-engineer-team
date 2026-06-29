@@ -6,6 +6,145 @@ const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 
 const SUPPORTED_GRADES = ['24级', '25级'];
 
+const PRESET_PLAN_RULES = {
+  '24级': {
+    id: 'PRESET-INFO-2024',
+    name: '2024级信息学院大类培养方案基础规则',
+    source: 'preset_info_college_2024',
+    description: '按培养方案核心模块预置的保守展示规则，复杂认定以学院人工审核为准。',
+    modules: [
+      {
+        key: 'general',
+        name: '通识模块',
+        requiredCredits: 30,
+        categories: [
+          '公共体育',
+          '新生研讨课',
+          '思想政治理论课',
+          '公共外语',
+          '公共外语（拓展类课程）',
+          '心理健康教育',
+          '公共选修课',
+          '军事课',
+          '通识核心课',
+          '一般通识课',
+          '美育课程',
+          '职业生涯规划',
+        ],
+        keywords: ['体育', '英语', '思政', '马克思', '心理', '美育', '军事', '通识', '职业生涯', '新生研讨'],
+      },
+      {
+        key: 'major_foundation',
+        name: '部类与专业基础',
+        requiredCredits: 26,
+        categories: ['部类基础', '部类共同'],
+        requiredCourses: ['高等数学Ⅰ', '高等数学Ⅱ', '高等代数Ⅰ', '高等代数Ⅱ', '程序设计'],
+        keywords: ['高等数学', '高等代数', '程序设计'],
+      },
+      {
+        key: 'major_required',
+        name: '专业核心/必修',
+        requiredCredits: 26,
+        categories: ['专业核心课', '专业必修', '专业必修课'],
+        requiredCourses: [
+          '离散数学A',
+          '概率论与数理统计',
+          '数据科学导论',
+          '计算机系统基础Ⅰ',
+          '数据结构与算法Ⅰ',
+          '网络空间安全引论',
+          '数据库系统',
+          '操作系统',
+        ],
+        keywords: ['离散数学', '概率论', '数据科学导论', '计算机系统', '数据结构', '网络空间安全', '数据库', '操作系统'],
+      },
+      {
+        key: 'major_elective',
+        name: '专业选修/个性化选修',
+        requiredCredits: 12,
+        categories: ['专业选修', '专业选修课', '个性化选修', '方向选修'],
+        keywords: ['选修', '图论', '机器学习', '人工智能', '数据挖掘', '云计算', '前沿', '专题'],
+      },
+      {
+        key: 'practice',
+        name: '科研与实践环节',
+        requiredCredits: 8,
+        categories: ['科研与实践环节', '实践环节', '实验实践', '专业实践'],
+        requiredCourses: ['军训', '综合设计', '毕业论文（设计）'],
+        keywords: ['实践', '实训', '实验', '课程设计', '综合设计', '军训', '毕业论文', '毕业设计', '科研训练', '竞赛'],
+      },
+    ],
+  },
+  '25级': {
+    id: 'PRESET-INFO-2025',
+    name: '2025级信息学院大类培养方案基础规则',
+    source: 'preset_info_college_2025',
+    description: '按培养方案核心模块预置的保守展示规则，复杂认定以学院人工审核为准。',
+    modules: [
+      {
+        key: 'general',
+        name: '通识模块',
+        requiredCredits: 30,
+        categories: [
+          '公共体育',
+          '新生研讨课',
+          '思想政治理论课',
+          '公共外语',
+          '公共外语（拓展类课程）',
+          '心理健康教育',
+          '公共选修课',
+          '军事课',
+          '通识核心课',
+          '一般通识课',
+          '美育课程',
+          '职业生涯规划',
+        ],
+        keywords: ['体育', '英语', '思政', '马克思', '心理', '美育', '军事', '通识', '职业生涯', '新生研讨'],
+      },
+      {
+        key: 'major_foundation',
+        name: '部类与专业基础',
+        requiredCredits: 26,
+        categories: ['部类基础', '部类共同'],
+        requiredCourses: ['高等数学Ⅰ', '高等数学Ⅱ', '高等代数Ⅰ', '高等代数Ⅱ', '程序设计'],
+        keywords: ['高等数学', '高等代数', '程序设计'],
+      },
+      {
+        key: 'major_required',
+        name: '专业核心/必修',
+        requiredCredits: 28,
+        categories: ['专业核心课', '专业必修', '专业必修课'],
+        requiredCourses: [
+          '离散数学A',
+          '概率论与数理统计',
+          '数据科学导论',
+          '计算机系统基础Ⅰ',
+          '数据结构与算法Ⅰ',
+          '网络空间安全引论',
+          '数据库系统',
+          '操作系统',
+        ],
+        keywords: ['离散数学', '概率论', '数据科学导论', '计算机系统', '数据结构', '网络空间安全', '数据库', '操作系统'],
+      },
+      {
+        key: 'major_elective',
+        name: '专业选修/个性化选修',
+        requiredCredits: 14,
+        categories: ['专业选修', '专业选修课', '个性化选修', '方向选修'],
+        keywords: ['选修', '图论', '机器学习', '人工智能', '数据挖掘', '云计算', '前沿', '专题'],
+      },
+      {
+        key: 'practice',
+        name: '科研与实践环节',
+        requiredCredits: 8,
+        categories: ['科研与实践环节', '实践环节', '实验实践', '专业实践'],
+        requiredCourses: ['军训', '综合设计', '毕业论文（设计）'],
+        keywords: ['实践', '实训', '实验', '课程设计', '综合设计', '军训', '毕业论文', '毕业设计', '科研训练', '竞赛'],
+      },
+    ],
+  },
+};
+
 const DEFAULT_REQUIREMENTS_BY_GRADE = {
   '24级': [
     { module_name: '通识教育', credit_required: 30 },
@@ -33,6 +172,26 @@ function normalizeHeader(value) {
   return String(value || '').replace(/\s+/g, '').toLowerCase();
 }
 
+function normalizeCourseText(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[（）]/g, (char) => (char === '（' ? '(' : ')'))
+    .replace(/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/g, (char) => ({
+      Ⅰ: 'I',
+      Ⅱ: 'II',
+      Ⅲ: 'III',
+      Ⅳ: 'IV',
+      Ⅴ: 'V',
+      Ⅵ: 'VI',
+      Ⅶ: 'VII',
+      Ⅷ: 'VIII',
+      Ⅸ: 'IX',
+      Ⅹ: 'X',
+    }[char] || char))
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
 function pickValue(row, aliases) {
   const keys = Object.keys(row);
   const normalizedAliases = aliases.map(normalizeHeader);
@@ -52,6 +211,10 @@ function parseScore(value) {
     合格: 65,
     不及格: 0,
     未通过: 0,
+    P: 65,
+    p: 65,
+    F: 0,
+    f: 0,
   };
   if (gradeMap[text] !== undefined) return gradeMap[text];
   const numeric = Number.parseFloat(text.replace(/[^\d.]/g, ''));
@@ -60,8 +223,8 @@ function parseScore(value) {
 
 function isPassed(course) {
   const rawScore = String(course.rawScore ?? '').trim();
-  if (/不及格|未通过|不合格|fail/i.test(rawScore)) return false;
-  if (/优|良|中|及格|通过|合格|pass/i.test(rawScore)) return true;
+  if (/不及格|未通过|不合格|fail|^f$/i.test(rawScore)) return false;
+  if (/优|良|中|及格|通过|合格|pass|^p$/i.test(rawScore)) return true;
   return Number(course.score || 0) >= 60;
 }
 
@@ -138,14 +301,18 @@ async function parseTranscriptFile(filePath, originalName = '') {
   const courses = rows
     .map((row) => {
       const name = String(pickValue(row, ['课程名称', '课程名', '课程', 'name', 'course', 'course_name']) || '').trim();
+      const code = String(pickValue(row, ['课程代码', '课程编码', 'code', 'course_code']) || '').trim();
       const credit = Number.parseFloat(String(pickValue(row, ['学分', 'credit', 'credits']) || '').replace(/[^\d.]/g, '')) || 0;
-      const rawScore = pickValue(row, ['成绩', '分数', 'score', 'grade', '总评成绩']);
-      const module = String(pickValue(row, ['模块', '课程模块', '类别', '课程类别', 'module', 'category']) || '').trim();
+      const rawScore = pickValue(row, ['最终成绩', '总评成绩', '成绩', '分数', 'score', 'grade', '成绩标志', '期末成绩']);
+      const category = String(pickValue(row, ['课程类别', '类别', '课程性质', '性质', 'category', 'type']) || '').trim();
+      const module = String(pickValue(row, ['模块', '课程模块', 'module']) || '').trim();
       return {
+        code,
         name,
         credit,
         score: parseScore(rawScore),
         rawScore,
+        category,
         module,
       };
     })
@@ -159,6 +326,145 @@ async function parseTranscriptFile(filePath, originalName = '') {
   }, {});
 
   return { courses, totalCredits, creditsByModule, rawRowCount: rows.length };
+}
+
+function courseMatchesText(course, value) {
+  const target = normalizeCourseText(value);
+  if (!target) return false;
+  const name = normalizeCourseText(course.name);
+  const code = normalizeCourseText(course.code);
+  return name === target || code === target || name.includes(target) || target.includes(name);
+}
+
+function classifyCourseByRule(course, rule) {
+  const category = String(course.category || '').trim();
+  const text = `${course.name || ''} ${course.category || ''} ${course.module || ''}`;
+
+  for (const moduleRule of rule.modules || []) {
+    if ((moduleRule.requiredCourses || []).some((item) => courseMatchesText(course, item))) {
+      return {
+        key: moduleRule.key,
+        name: moduleRule.name,
+        confidence: 'high',
+        reason: '匹配培养方案必修/核心课程清单',
+      };
+    }
+  }
+
+  for (const moduleRule of rule.modules || []) {
+    if ((moduleRule.categories || []).some((item) => normalizeCourseText(item) === normalizeCourseText(category))) {
+      return {
+        key: moduleRule.key,
+        name: moduleRule.name,
+        confidence: 'high',
+        reason: `匹配成绩单课程类别“${category}”`,
+      };
+    }
+  }
+
+  for (const moduleRule of rule.modules || []) {
+    if ((moduleRule.keywords || []).some((keyword) => new RegExp(keyword).test(text))) {
+      return {
+        key: moduleRule.key,
+        name: moduleRule.name,
+        confidence: 'low',
+        reason: '按课程名称关键词保守归类',
+      };
+    }
+  }
+
+  return null;
+}
+
+function buildPresetRuleAnalysis(parsed, rule, context) {
+  const moduleProgress = (rule.modules || []).map((moduleRule) => ({
+    key: moduleRule.key,
+    name: moduleRule.name,
+    done: 0,
+    total: Number(moduleRule.requiredCredits) || 0,
+    missing: Number(moduleRule.requiredCredits) || 0,
+    tone: 'red',
+    lowConfidenceCredits: 0,
+  }));
+  const moduleMap = new Map(moduleProgress.map((item) => [item.key, item]));
+  const matchedCourses = [];
+  const unclassifiedCourses = [];
+
+  for (const course of parsed.courses) {
+    const matched = classifyCourseByRule(course, rule);
+    if (!matched) {
+      unclassifiedCourses.push({
+        name: course.name,
+        credit: course.credit,
+        category: course.category || '',
+        module: course.module || '',
+        reason: '未命中课程清单、课程类别或关键词规则',
+      });
+      continue;
+    }
+    const progress = moduleMap.get(matched.key);
+    if (progress) {
+      progress.done = Number((progress.done + course.credit).toFixed(1));
+      if (matched.confidence !== 'high') {
+        progress.lowConfidenceCredits = Number((progress.lowConfidenceCredits + course.credit).toFixed(1));
+      }
+    }
+    matchedCourses.push({
+      name: course.name,
+      credit: course.credit,
+      category: course.category || '',
+      module: course.module || '',
+      matchedModule: matched.name,
+      confidence: matched.confidence,
+      reason: matched.reason,
+    });
+  }
+
+  for (const item of moduleProgress) {
+    const pct = item.total ? item.done / item.total : 0;
+    item.missing = Number(Math.max(item.total - item.done, 0).toFixed(1));
+    item.tone = pct >= 1 ? 'green' : pct >= 0.7 ? 'amber' : 'red';
+  }
+
+  const passedCourseNames = new Set(parsed.courses.map((course) => normalizeCourseText(course.name)));
+  const missingRequiredCourses = [];
+  for (const moduleRule of rule.modules || []) {
+    for (const requiredName of moduleRule.requiredCourses || []) {
+      const normalizedRequired = normalizeCourseText(requiredName);
+      const hasCourse = [...passedCourseNames].some((name) => name === normalizedRequired || name.includes(normalizedRequired) || normalizedRequired.includes(name));
+      if (!hasCourse) {
+        missingRequiredCourses.push({
+          name: requiredName,
+          module: moduleRule.name,
+        });
+      }
+    }
+  }
+
+  const missingModules = moduleProgress.filter((item) => item.done < item.total);
+  const sourceText = `已匹配${context.grade}预置培养方案规则“${rule.name}”`;
+  const missingModuleText = [
+    ...missingModules.map((item) => `${item.name}缺少 ${item.missing} 学分`),
+    ...missingRequiredCourses.slice(0, 4).map((item) => `${item.module}未识别《${item.name}》`),
+  ].join('，') || '培养方案基础学分要求已基本达成';
+  const cautionText = unclassifiedCourses.length
+    ? `另有 ${unclassifiedCourses.length} 门课程暂未归类，已列为需人工确认。`
+    : '未发现需人工确认的未归类课程。';
+  const suggestion = missingModules.length || missingRequiredCourses.length
+    ? `${sourceText}。已识别 ${parsed.courses.length} 门已通过课程，合计 ${parsed.totalCredits} 学分；建议优先补足 ${missingModules.map((item) => item.name).join('、') || '缺失必修课程'}。${cautionText}`
+    : `${sourceText}。已识别 ${parsed.courses.length} 门已通过课程，合计 ${parsed.totalCredits} 学分；建议继续核对毕业论文、科研实践和学院人工审核要求。${cautionText}`;
+
+  return {
+    missingModule: missingModuleText,
+    suggestion,
+    warningLevel: missingModules.some((item) => item.missing >= 8) || missingRequiredCourses.length >= 3 ? 'High' : (missingModules.length || missingRequiredCourses.length || unclassifiedCourses.length ? 'Medium' : 'Low'),
+    moduleProgress,
+    missingRequiredCourses,
+    unclassifiedCourses,
+    matchedCourses,
+    confidence: unclassifiedCourses.length || matchedCourses.some((course) => course.confidence !== 'high') ? 'medium' : 'high',
+    rule,
+  };
 }
 
 function buildModuleProgress(parsed, requirements) {
@@ -243,7 +549,26 @@ async function ensureAnalysisSchema() {
       ADD COLUMN IF NOT EXISTS plan_id VARCHAR(50),
       ADD COLUMN IF NOT EXISTS selected_grade VARCHAR(20)
   `);
+  await db.query(`
+    ALTER TABLE training_plan
+      ADD COLUMN IF NOT EXISTS rule_json TEXT
+  `);
   await db.query('ALTER TABLE analysis_result ALTER COLUMN missing_module TYPE TEXT');
+}
+
+function parsePlanRuleJson(plan) {
+  if (!plan?.rule_json) return null;
+  try {
+    const rule = JSON.parse(plan.rule_json);
+    if (rule && Array.isArray(rule.modules)) return rule;
+  } catch (e) {
+    console.warn('Invalid training_plan.rule_json:', e.message);
+  }
+  return null;
+}
+
+function getPresetRuleForGrade(grade) {
+  return PRESET_PLAN_RULES[normalizeGrade(grade)] || PRESET_PLAN_RULES['24级'];
 }
 
 async function getPlanForGrade(grade, studentMajor = '') {
@@ -266,7 +591,9 @@ async function getPlanForGrade(grade, studentMajor = '') {
     return {
       plan: null,
       requirements: DEFAULT_REQUIREMENTS_BY_GRADE[normalizedGrade] || DEFAULT_REQUIREMENTS_BY_GRADE['24级'],
-      usesFallback: true,
+      rule: getPresetRuleForGrade(normalizedGrade),
+      ruleSource: 'preset',
+      usesFallback: false,
     };
   }
 
@@ -278,12 +605,16 @@ async function getPlanForGrade(grade, studentMajor = '') {
     [plan.plan_id]
   );
 
+  const storedRule = parsePlanRuleJson(plan);
+
   return {
     plan,
     requirements: requirementRows.length
       ? requirementRows
       : (DEFAULT_REQUIREMENTS_BY_GRADE[normalizedGrade] || DEFAULT_REQUIREMENTS_BY_GRADE['24级']),
-    usesFallback: requirementRows.length === 0,
+    rule: storedRule || getPresetRuleForGrade(normalizedGrade),
+    ruleSource: storedRule ? 'training_plan_rule' : 'preset',
+    usesFallback: !storedRule && requirementRows.length === 0,
   };
 }
 
@@ -330,11 +661,17 @@ exports.uploadTranscript = async (req, res) => {
     setTimeout(async () => {
       try {
         const parsed = await parseTranscriptFile(req.file.path, req.file.originalname);
-        const analysis = buildAnalysis(parsed, planContext.requirements, {
-          grade: selectedGrade,
-          plan: planContext.plan,
-          usesFallback: planContext.usesFallback,
-        });
+        const analysis = planContext.rule
+          ? buildPresetRuleAnalysis(parsed, planContext.rule, {
+            grade: selectedGrade,
+            plan: planContext.plan,
+            usesFallback: planContext.usesFallback,
+          })
+          : buildAnalysis(parsed, planContext.requirements, {
+            grade: selectedGrade,
+            plan: planContext.plan,
+            usesFallback: planContext.usesFallback,
+          });
         await ensureAnalysisSchema();
         await db.query('UPDATE transcript_task SET parse_status = $1 WHERE transcript_id = $2', ['Success', transcriptId]);
         const resultId = `RES-${Date.now()}`;
@@ -357,6 +694,12 @@ exports.uploadTranscript = async (req, res) => {
                 major: planContext.plan.major,
               } : null,
               requirementSource: planContext.usesFallback ? 'default' : 'training_plan',
+              ruleSource: planContext.ruleSource || (planContext.usesFallback ? 'default' : 'training_plan'),
+              ruleName: analysis.rule?.name || '',
+              confidence: analysis.confidence || 'medium',
+              missingRequiredCourses: analysis.missingRequiredCourses || [],
+              unclassifiedCourses: analysis.unclassifiedCourses || [],
+              matchedCourses: analysis.matchedCourses || [],
               parsedCourseCount: parsed.courses.length,
               parsedTotalCredits: parsed.totalCredits,
               rawRowCount: parsed.rawRowCount,
@@ -389,6 +732,12 @@ exports.uploadTranscript = async (req, res) => {
                 major: planContext.plan.major,
               } : null,
               requirementSource: planContext.usesFallback ? 'default' : 'training_plan',
+              ruleSource: planContext.ruleSource || (planContext.usesFallback ? 'default' : 'training_plan'),
+              ruleName: planContext.rule?.name || '',
+              confidence: 'low',
+              missingRequiredCourses: [],
+              unclassifiedCourses: [],
+              matchedCourses: [],
               parseError: e.message,
             }),
             planContext.plan?.plan_id || null,
@@ -408,6 +757,8 @@ exports.uploadTranscript = async (req, res) => {
         major: planContext.plan.major,
       } : null,
       requirement_source: planContext.usesFallback ? 'default' : 'training_plan',
+      rule_source: planContext.ruleSource || (planContext.usesFallback ? 'default' : 'training_plan'),
+      rule_name: planContext.rule?.name || '',
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -419,7 +770,7 @@ exports.getAnalysisResult = async (req, res) => {
   try {
     await ensureAnalysisSchema();
     const { rows } = await db.query(
-      `SELECT ar.*, tt.parse_status, tt.upload_time, tt.original_name
+      `SELECT ar.*, tt.parse_status, tt.upload_time, tt.original_name, tt.student_id
        FROM analysis_result ar
        LEFT JOIN transcript_task tt ON tt.transcript_id = ar.transcript_id
        WHERE ar.transcript_id = $1
@@ -431,6 +782,15 @@ exports.getAnalysisResult = async (req, res) => {
       return res.status(404).json({ message: 'Result not found or parsing in progress' });
     }
     const result = rows[0];
+    if (req.user.role === 'student' || req.user.role === 'student_leader') {
+      const { rows: profileRows } = await db.query(
+        'SELECT student_id FROM student_profile WHERE user_id = $1',
+        [req.user.userId]
+      );
+      if (!profileRows.length || profileRows[0].student_id !== result.student_id) {
+        return res.status(403).json({ error: 'No permission to view this analysis result' });
+      }
+    }
     if (result.detail_json) {
       try {
         const detail = JSON.parse(result.detail_json);
@@ -438,6 +798,12 @@ exports.getAnalysisResult = async (req, res) => {
         result.selected_grade = result.selected_grade || detail.selectedGrade;
         result.plan = detail.plan || null;
         result.requirement_source = detail.requirementSource || '';
+        result.rule_source = detail.ruleSource || '';
+        result.rule_name = detail.ruleName || '';
+        result.confidence = detail.confidence || '';
+        result.missing_required_courses = detail.missingRequiredCourses || [];
+        result.unclassified_courses = detail.unclassifiedCourses || [];
+        result.matched_courses = detail.matchedCourses || [];
         result.parsed_course_count = detail.parsedCourseCount || 0;
         result.parsed_total_credits = detail.parsedTotalCredits || 0;
         result.parse_error = detail.parseError || '';

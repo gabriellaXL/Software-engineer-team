@@ -2687,6 +2687,8 @@ function renderAnalysis() {
   const matchedPlan = state.analysisResult?.plan || state.transcriptTask?.matched_plan || publishedPlans[0] || null;
   const resultGrade = state.analysisResult?.selected_grade || state.transcriptTask?.selected_grade || selectedGrade;
   const requirementSource = state.analysisResult?.requirement_source || state.transcriptTask?.requirement_source || "";
+  const ruleSource = state.analysisResult?.rule_source || state.transcriptTask?.rule_source || "";
+  const ruleName = state.analysisResult?.rule_name || state.transcriptTask?.rule_name || "";
   return `
     ${pageHead("成绩分析", "上传成绩单后与培养方案自动比对，生成缺失模块、学分达成度和选课建议。", [
       ["upload-transcript", "上传成绩单", "upload", "primary-button"]
@@ -2716,7 +2718,8 @@ function renderAnalysis() {
           <p>${matchedPlan
             ? escapeHtml([matchedPlan.major, matchedPlan.grade || resultGrade].filter(Boolean).join(" / ") || "适用范围未填写")
             : "管理员发布对应年级培养方案后，系统会优先使用方案中的课程规则；当前仍可使用内置规则完成演示分析。"}</p>
-          ${requirementSource === "default" ? `<span class="badge warning">使用内置规则</span>` : matchedPlan ? `<span class="badge success">已匹配方案</span>` : `<span class="badge warning">待维护方案</span>`}
+          ${ruleSource === "preset" ? `<span class="badge warning">预置规则</span>` : requirementSource === "default" ? `<span class="badge warning">使用内置规则</span>` : matchedPlan ? `<span class="badge success">已匹配方案</span>` : `<span class="badge warning">待维护方案</span>`}
+          ${ruleName ? `<p>规则：${escapeHtml(ruleName)}</p>` : ""}
         </div>
       </div>
       <div class="panel">
@@ -2764,6 +2767,7 @@ function renderAnalysis() {
             <article><strong>${escapeHtml(state.analysisResult.selected_grade || selectedGrade)}</strong><span>选择年级</span></article>
             <article><strong>${Number(state.analysisResult.parsed_course_count || 0)}</strong><span>识别课程</span></article>
             <article><strong>${Number(state.analysisResult.parsed_total_credits || 0)}</strong><span>通过学分</span></article>
+            <article><strong>${escapeHtml(getAnalysisConfidenceLabel(state.analysisResult.confidence))}</strong><span>分析置信度</span></article>
           </div>
         ` : `<p class="muted-text" style="padding:12px 0">请先选择年级并上传 CSV / Excel 成绩单。</p>`}
       </div>
@@ -4431,13 +4435,68 @@ function renderAnalysisSuggestions() {
   if (state.analysisResult) {
     const level = String(state.analysisResult.warning_level || "").toLowerCase();
     const type = level === "high" ? "danger" : level === "low" ? "success" : "warning";
-    return reminder(
+    return [
+      reminder(
       state.analysisResult.missing_module || "未命名缺失模块",
       state.analysisResult.suggestion || "暂无建议，请联系管理员维护培养方案规则。",
       type
-    );
+      ),
+      renderMissingRequiredCourses(),
+      renderUnclassifiedCourses(),
+    ].filter(Boolean).join("");
   }
   return reminder("暂无选课建议", "请上传成绩单，系统将根据培养方案生成个性化选课建议。", "info");
+}
+
+function getAnalysisConfidenceLabel(value) {
+  const text = String(value || "").toLowerCase();
+  if (text === "high") return "较高";
+  if (text === "medium") return "中等";
+  if (text === "low") return "较低";
+  return "待评估";
+}
+
+function renderMissingRequiredCourses() {
+  const rows = state.analysisResult?.missing_required_courses || state.analysisResult?.missingRequiredCourses || [];
+  if (!Array.isArray(rows) || !rows.length) return "";
+  return `
+    <article class="list-card analysis-detail-card">
+      <header>
+        <div>
+          <h3>明确缺失课程</h3>
+          <p>依据预置培养方案核心课程清单识别。</p>
+        </div>
+        ${badge(`${rows.length} 门`, "warning")}
+      </header>
+      <div class="analysis-chip-list">
+        ${rows.slice(0, 12).map((item) => `<span>${escapeHtml(item.module || "未分组")} · ${escapeHtml(item.name || item)}</span>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderUnclassifiedCourses() {
+  const rows = state.analysisResult?.unclassified_courses || state.analysisResult?.unclassifiedCourses || [];
+  if (!Array.isArray(rows) || !rows.length) return "";
+  return `
+    <article class="list-card analysis-detail-card">
+      <header>
+        <div>
+          <h3>需人工确认课程</h3>
+          <p>这些课程暂未自动归类，不会被系统强行计入达成结论。</p>
+        </div>
+        ${badge(`${rows.length} 门`, "warning")}
+      </header>
+      <div class="analysis-course-list">
+        ${rows.slice(0, 8).map((item) => `
+          <div>
+            <strong>${escapeHtml(item.name || "-")}</strong>
+            <span>${Number(item.credit || 0)} 学分 · ${escapeHtml(item.category || "类别未填写")}</span>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
 }
 
 function getAnalysisCredits() {
@@ -4447,6 +4506,7 @@ function getAnalysisCredits() {
     name: item.name || item.module_name || '未命名模块',
     done: Number(item.done || item.credit_done || 0),
     total: Number(item.total || item.credit_required || 0),
+    missing: Number(item.missing || 0),
     tone: item.tone || 'green',
   }));
 }
@@ -4507,12 +4567,12 @@ function renderPolicyResults(limit) {
 }
 
 function creditRow(item) {
-  const pct = Math.min(100, Math.round((item.done / item.total) * 100));
+  const pct = item.total ? Math.min(100, Math.round((item.done / item.total) * 100)) : 0;
   return `
     <div class="credit-row">
       <strong>${item.name}</strong>
       <div class="progress-bar"><span class="tone-${item.tone}" style="width:${pct}%"></span></div>
-      <span>${item.done}/${item.total}</span>
+      <span>${item.done}/${item.total}${item.missing ? ` · 缺${item.missing}` : ""}</span>
     </div>
   `;
 }
