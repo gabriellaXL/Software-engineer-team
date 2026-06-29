@@ -23,7 +23,8 @@ async function ensureProfileSchema() {
       role VARCHAR(50),
       account_id VARCHAR(50) UNIQUE,
       password VARCHAR(100),
-      status VARCHAR(20)
+      status VARCHAR(20),
+      token_version INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS student_profile (
@@ -50,6 +51,10 @@ async function ensureProfileSchema() {
       phone VARCHAR(20),
       email VARCHAR(100)
     );
+  `);
+  await db.query(`
+    ALTER TABLE tb_user
+      ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0
   `);
   profileSchemaReady = true;
 }
@@ -82,6 +87,7 @@ async function getJoinedProfile(userId, role) {
 exports.login = async (req, res) => {
   const { accountId, password, role } = req.body;
   try {
+    await ensureProfileSchema();
     const { rows } = await db.query('SELECT * FROM tb_user WHERE account_id = $1', [accountId]);
     const user = rows[0];
 
@@ -99,7 +105,7 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { userId: user.user_id, role: user.role, accountId: user.account_id },
+      { userId: user.user_id, role: user.role, accountId: user.account_id, tokenVersion: Number(user.token_version || 0) },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -291,7 +297,7 @@ exports.changePassword = async (req, res) => {
     }
 
     await db.query(
-      'UPDATE tb_user SET password = $1 WHERE user_id = $2',
+      'UPDATE tb_user SET password = $1, token_version = COALESCE(token_version, 0) + 1 WHERE user_id = $2',
       [newPassword, userId]
     );
 

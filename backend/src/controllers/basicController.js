@@ -190,7 +190,7 @@ function mapUser(row) {
     id: row.user_id,
     accountId: row.account_id,
     account_id: row.account_id,
-    name: row.name || row.account_id,
+    name: row.name || '',
     role: row.role,
     roleName,
     major: row.major || '',
@@ -202,7 +202,7 @@ function mapUser(row) {
     statusText: statusToText(row.status),
     row: [
       row.account_id,
-      row.name || row.account_id,
+      row.name || '',
       roleName,
       row.major || '-',
       row.grade || '-',
@@ -445,8 +445,12 @@ exports.createUser = async (req, res) => {
     department,
   } = req.body;
   const resolvedAccountId = accountId || accountIdAlias;
+  const resolvedName = String(name || '').trim();
   if (!resolvedAccountId || !password) {
     return res.status(400).json({ error: 'Account and password are required' });
+  }
+  if (!resolvedName) {
+    return res.status(400).json({ error: '姓名不能为空' });
   }
   if (!isValidPhoneValue(phone)) {
     return res.status(400).json({ error: '手机号格式不正确，请输入 11 位数字' });
@@ -467,13 +471,13 @@ exports.createUser = async (req, res) => {
       const studentId = `S-${Date.now()}`;
       await db.query(
         'INSERT INTO student_profile (student_id, user_id, student_no, name, major, grade, phone, email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-        [studentId, userId, resolvedAccountId, name || resolvedAccountId, major || '', grade || '', phone || '', email || '']
+        [studentId, userId, resolvedAccountId, resolvedName, major || '', grade || '', phone || '', email || '']
       );
     } else {
       const adminId = `A-${Date.now()}`;
       await db.query(
         'INSERT INTO admin_profile (admin_id, user_id, name, department, role, phone, email) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [adminId, userId, name || resolvedAccountId, department || '', role, phone || '', email || '']
+        [adminId, userId, resolvedName, department || '', role, phone || '', email || '']
       );
     }
 
