@@ -813,7 +813,7 @@ tr:last-child td {
 
 .analysis-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -839,10 +839,56 @@ tr:last-child td {
 
 .credit-row {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) 74px;
+  grid-template-columns: 140px minmax(0, 1fr) 120px;
   align-items: center;
   gap: 10px;
   font-size: 14px;
+}
+
+.analysis-detail-card {
+  gap: 12px;
+}
+
+.analysis-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analysis-chip-list span {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.analysis-course-list {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-course-list div {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.analysis-course-list strong,
+.analysis-course-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.analysis-course-list span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .student-phone {
