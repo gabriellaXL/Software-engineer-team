@@ -194,6 +194,57 @@ function resolveApiBaseUrl() {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+function isApiRequest(input) {
+  const url = typeof input === "string" ? input : input?.url || "";
+  if (!url) return false;
+  if (url.startsWith("/api")) return true;
+  if (API_BASE_URL && url.startsWith(API_BASE_URL)) return true;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.pathname.startsWith("/api/");
+  } catch (error) {
+    return false;
+  }
+}
+
+let isHandlingAuthExpiry = false;
+
+function handleAuthExpired(message = "登录状态已失效，请重新登录。") {
+  if (isHandlingAuthExpiry) return;
+  isHandlingAuthExpiry = true;
+  clearSessionState();
+  state.role = null;
+  state.isAuthenticated = false;
+  state.token = null;
+  state.userProfile = null;
+  state.studentView = "login";
+  state.studentAppView = "list";
+  state.adminView = "dashboard";
+  state.applications = [];
+  state.notices = [];
+  state.processNodes = [];
+  state.processRecords = [];
+  state.processSubmissions = [];
+  state.processDrafts = [];
+  state.processHistory = [];
+  state.analysisResult = null;
+  state.transcriptTask = null;
+  showToast(message);
+  render();
+  setTimeout(() => {
+    isHandlingAuthExpiry = false;
+  }, 0);
+}
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async function guardedFetch(input, init) {
+  const response = await nativeFetch(input, init);
+  if (state.token && response.status === 401 && isApiRequest(input)) {
+    handleAuthExpired("登录状态已失效，请重新登录。");
+  }
+  return response;
+};
+
 function apiHeaders(json = false) {
   const headers = {};
   if (json) headers["Content-Type"] = "application/json";
@@ -1225,6 +1276,20 @@ function isDocxTemplate(template) {
   return false;
 }
 
+const REQUIRED_CERTIFICATE_TEMPLATE_TAGS = ['姓名', '学号'];
+
+function extractDocxTemplateTags(zip) {
+  const documentXml = zip.file("word/document.xml");
+  if (!documentXml) return [];
+  const text = documentXml.asText().replace(/<[^>]+>/g, "");
+  const tagsMatch = text.match(/\{([^{}]+)\}/g) || [];
+  return [...new Set(tagsMatch.map(t => t.slice(1, -1).trim()).filter(Boolean))];
+}
+
+function getMissingCertificateTemplateTags(tags) {
+  return REQUIRED_CERTIFICATE_TEMPLATE_TAGS.filter((tag) => !tags.includes(tag));
+}
+
 window.handleTemplateSelect = async function() {
   const select = document.getElementById("appTemplateSelect");
   const container = document.getElementById("dynamic-fields-container");
@@ -1247,12 +1312,16 @@ window.handleTemplateSelect = async function() {
         linebreaks: true,
     });
     
-    // Extract text directly from document.xml to avoid parsing fragmentation
-    const xml = zip.file("word/document.xml").asText();
-    const text = xml.replace(/<[^>]+>/g, ""); // Strip all XML tags
-    const tagsMatch = text.match(/\{([^{}]+)\}/g) || [];
-    const uniqueTags = [...new Set(tagsMatch.map(t => t.slice(1, -1).trim()))];
+    const uniqueTags = extractDocxTemplateTags(zip);
     console.log("解析到的 Word 标签:", uniqueTags);
+    const missingRequiredTags = getMissingCertificateTemplateTags(uniqueTags);
+    if (missingRequiredTags.length) {
+      showToast(`模板缺少关键占位符：${missingRequiredTags.map(tag => `{${tag}}`).join('、')}`);
+      if (container) {
+        container.innerHTML = `<p class="danger-text">该模板缺少 ${missingRequiredTags.map(tag => `{${escapeHtml(tag)}}`).join('、')} 占位符，无法自动填充真实学生信息。请联系管理员重新上传规范模板。</p>`;
+      }
+      return;
+    }
 
     const p = state.userProfile || {};
     const profileMap = {
@@ -1320,6 +1389,11 @@ window.previewFilledTemplate = async function() {
         paragraphLoop: true,
         linebreaks: true,
     });
+    const uniqueTags = extractDocxTemplateTags(zip);
+    const missingRequiredTags = getMissingCertificateTemplateTags(uniqueTags);
+    if (missingRequiredTags.length) {
+      throw new Error(`模板缺少关键占位符：${missingRequiredTags.map(tag => `{${tag}}`).join('、')}，无法自动填充真实学生信息`);
+    }
 
     const p = state.userProfile || {};
     const data = {
@@ -2071,7 +2145,7 @@ function renderConsult() {
               <div class="toolbar">
                 ${item.attachmentUrl
                   ? `<button type="button" class="secondary-button" data-action="download-policy-attachment" data-url="${escapeHtml(item.attachmentUrl)}" data-name="${escapeHtml(item.attachment)}">${icon("download")}下载</button>`
-                  : `<button type="button" class="secondary-button" data-action="download-template">${icon("download")}下载</button>`}
+                  : `<span class="muted-text">暂无可下载附件</span>`}
                 <button type="button" class="ghost-button" data-action="copy-link">${icon("file")}官方渠道</button>
               </div>
             </article>
@@ -2943,7 +3017,7 @@ function renderUserManage() {
           </label>
           <label class="field">
             <span>姓名</span>
-            <input name="name" type="text" placeholder="请输入姓名" value="${escapeHtml(editingUser?.name || "")}" />
+            <input name="name" type="text" placeholder="请输入姓名" value="${escapeHtml(editingUser?.name || "")}" required />
           </label>
           <label class="field">
             <span>角色</span>
@@ -6183,6 +6257,10 @@ document.addEventListener("submit", async (event) => {
     }
     if (!state.editingUserId && !payload.password) {
       showToast("新建用户时请填写初始密码。");
+      return;
+    }
+    if (!payload.name) {
+      showToast("请填写姓名。");
       return;
     }
     if (state.editingUserId && !payload.password) {

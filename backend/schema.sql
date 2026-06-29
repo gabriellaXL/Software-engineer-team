@@ -4,7 +4,8 @@ CREATE TABLE tb_user (
     role VARCHAR(50),
     account_id VARCHAR(50) UNIQUE,
     password VARCHAR(100),
-    status VARCHAR(20)
+    status VARCHAR(20),
+    token_version INTEGER DEFAULT 0
 );
 
 CREATE TABLE student_profile (
