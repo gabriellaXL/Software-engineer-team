@@ -112,7 +112,7 @@ if (params.get("admin")) {
 
 const studentNav = [
   ["home", "首页", "home"],
-  ["consult", "智能咨询", "message"],
+  ["consult", "政策咨询", "message"],
   ["process", "党团流程", "route"],
   ["notices", "通知公告", "bell"],
   ["applications", "证明申请", "file"],
@@ -2024,7 +2024,7 @@ function renderStudentHome() {
       ${metric("证明记录", String(applicationCount), "近一年审批留痕", "teal")}
     </section>
     <section class="grid four" style="margin-top:14px">
-      ${actionCard("consult", "智能咨询", "政策问答与模板定位", "message", "brand")}
+      ${actionCard("consult", "政策咨询", "政策查询与办理入口", "message", "brand")}
       ${actionCard("process", "党团流程", "查看节点和提交材料", "route", "green")}
       ${actionCard("notices", "通知公告", "按标签接收精准提醒", "bell", "amber")}
       ${actionCard("applications", "证明申请", "在线提交与下载结果", "file", "red")}
@@ -2060,14 +2060,14 @@ function renderStudentHome() {
       <div class="panel">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">智能咨询</p>
-            <h2>快速问答</h2>
+            <p class="eyebrow">政策咨询</p>
+            <h2>快速查询</h2>
           </div>
         </div>
         <div class="toolbar">
           <label class="search-field">
             ${icon("search")}
-            <input type="search" data-policy-search placeholder="输入关键词，如奖学金 / 档案 / 宿舍" value="${escapeHtml(state.policyQuery)}" />
+            <input type="search" data-policy-search placeholder="输入政策关键词，如奖学金 / 档案 / 宿舍" value="${escapeHtml(state.policyQuery)}" />
           </label>
           <button type="button" class="primary-button" data-action="policy-search">查询</button>
         </div>
@@ -2098,14 +2098,14 @@ function renderConsult() {
   const categories = ["全部", "证明类", "党团类", "奖助类", "生活类"];
   const matchedPolicies = filteredPolicies();
   return `
-    ${pageHead("智能咨询", "基于政策知识库检索标准问答、附件模板和官方办理渠道。", [
+    ${pageHead("政策咨询", "基于政策知识库提供政策查询、标准答复、附件下载和办理入口。", [
       ["open-template-center", "前往模板下载", "download", "ghost-button"]
     ])}
     <section class="panel">
       <div class="toolbar">
         <label class="search-field">
           ${icon("search")}
-          <input type="search" data-policy-search placeholder="输入问题或关键词" value="${escapeHtml(state.policyQuery)}" />
+          <input type="search" data-policy-search placeholder="输入政策关键词或业务名称" value="${escapeHtml(state.policyQuery)}" />
         </label>
         <button type="button" class="primary-button" data-action="policy-search">查询</button>
       </div>
@@ -2113,44 +2113,16 @@ function renderConsult() {
         ${categories.map((item) => `<button type="button" class="chip ${state.policyCategory === item ? "is-active" : ""}" data-policy-category="${item}">${item}</button>`).join("")}
       </div>
     </section>
-    <section class="grid two" style="margin-top:14px">
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">匹配结果</p>
-            <h2>知识库条目</h2>
-          </div>
-          <span class="badge">${matchedPolicies.length} 条</span>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">匹配结果</p>
+          <h2>知识库条目</h2>
         </div>
-        <div class="result-list">
-          ${renderPolicyResults()}
-        </div>
+        <span class="badge">${matchedPolicies.length} 条</span>
       </div>
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">标准答复</p>
-            <h2>${escapeHtml(matchedPolicies[0]?.title || "暂无匹配")}</h2>
-            <p>${escapeHtml(matchedPolicies[0]?.answer || "换一个关键词试试，例如“在读证明”或“思想汇报”。")}</p>
-          </div>
-        </div>
-        <div class="template-list">
-          ${matchedPolicies.slice(0, 3).map((item) => `
-            <article class="list-card">
-              <header>
-                <h3>${escapeHtml(item.attachment)}</h3>
-                <span class="badge neutral">${escapeHtml(item.category)}</span>
-              </header>
-              <p>维护部门：${escapeHtml(item.owner)} · 更新于 ${escapeHtml(item.updated)}</p>
-              <div class="toolbar">
-                ${item.attachmentUrl
-                  ? `<button type="button" class="secondary-button" data-action="download-policy-attachment" data-url="${escapeHtml(item.attachmentUrl)}" data-name="${escapeHtml(item.attachment)}">${icon("download")}下载</button>`
-                  : `<span class="muted-text">暂无可下载附件</span>`}
-                <button type="button" class="ghost-button" data-action="copy-link">${icon("file")}官方渠道</button>
-              </div>
-            </article>
-          `).join("")}
-        </div>
+      <div class="result-list policy-result-list">
+        ${renderPolicyResults()}
       </div>
     </section>
   `;
@@ -4555,7 +4527,6 @@ function renderPolicyResults(limit) {
       <div class="list-meta">
         <span>${escapeHtml(item.owner)}</span>
         <span>更新于 ${escapeHtml(item.updated)}</span>
-        <span>附件：${escapeHtml(item.attachment)}</span>
       </div>
       ${item.attachmentUrl ? `
         <div class="toolbar">
@@ -4788,14 +4759,14 @@ function buildStudentGlobalSearchSections(query) {
       title: item.title || "未命名知识条目",
       summary: summarizeSearchText(item.answer, "暂无知识条目说明。"),
       meta: [item.category || "未分类", item.owner || "知识库维护人", item.updated ? `更新于 ${item.updated}` : ""],
-      badgeText: "智能咨询",
-      primaryAction: { action: "go-consult", label: "进入咨询", className: "secondary-button", icon: "message" },
+      badgeText: "政策咨询",
+      primaryAction: { action: "go-consult", label: "进入政策咨询", className: "secondary-button", icon: "message" },
       secondaryAction: item.attachmentUrl
         ? { action: "download-policy-attachment", label: "下载附件", className: "ghost-button", icon: "download", url: item.attachmentUrl, name: item.attachment || "知识库附件" }
         : null
     }));
   if (policies.length) {
-    sections.push({ title: "智能咨询", description: "知识库政策、办理说明与附件信息。", items: policies });
+    sections.push({ title: "政策咨询", description: "政策查询、标准答复、附件下载和办理入口。", items: policies });
   }
 
   const notices = getNoticeRows()
