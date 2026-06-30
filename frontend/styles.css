@@ -605,6 +605,18 @@ svg {
   gap: 10px;
 }
 
+.policy-result-list {
+  gap: 12px;
+}
+
+.policy-result-list .list-card {
+  gap: 10px;
+}
+
+.policy-result-list .toolbar {
+  margin-top: 2px;
+}
+
 .list-card {
   display: grid;
   gap: 8px;
