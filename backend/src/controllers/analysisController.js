@@ -6,6 +6,17 @@ const { ensureCoreTables } = require('../bootstrap/ensureCoreTables');
 
 const SUPPORTED_GRADES = ['24级', '25级'];
 
+function normalizeCreditProgress(done, total) {
+  const numericDone = Number(done) || 0;
+  const numericTotal = Number(total) || 0;
+  const displayDone = numericTotal > 0 ? Math.min(numericDone, numericTotal) : numericDone;
+  return {
+    done: Number(displayDone.toFixed(1)),
+    actualDone: Number(numericDone.toFixed(1)),
+    excess: Number(Math.max(numericDone - numericTotal, 0).toFixed(1)),
+  };
+}
+
 const PRESET_PLAN_RULES = {
   '24级': {
     id: 'PRESET-INFO-2024',
@@ -421,6 +432,10 @@ function buildPresetRuleAnalysis(parsed, rule, context) {
   }
 
   for (const item of moduleProgress) {
+    const normalized = normalizeCreditProgress(item.done, item.total);
+    item.done = normalized.done;
+    item.actualDone = normalized.actualDone;
+    item.excess = normalized.excess;
     const pct = item.total ? item.done / item.total : 0;
     item.missing = Number(Math.max(item.total - item.done, 0).toFixed(1));
     item.tone = pct >= 1 ? 'green' : pct >= 0.7 ? 'amber' : 'red';
@@ -470,11 +485,14 @@ function buildPresetRuleAnalysis(parsed, rule, context) {
 function buildModuleProgress(parsed, requirements) {
   return requirements.map((requirement) => {
     const total = Number(requirement.credit_required) || 0;
-    const done = Number((parsed.creditsByModule[requirement.module_name] || 0).toFixed(1));
+    const normalized = normalizeCreditProgress(parsed.creditsByModule[requirement.module_name] || 0, total);
+    const done = normalized.done;
     const pct = total ? done / total : 0;
     return {
       name: requirement.module_name,
       done,
+      actualDone: normalized.actualDone,
+      excess: normalized.excess,
       total,
       missing: Number(Math.max(total - done, 0).toFixed(1)),
       tone: pct >= 1 ? 'green' : pct >= 0.7 ? 'amber' : 'red',

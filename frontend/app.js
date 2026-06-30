@@ -4474,13 +4474,18 @@ function renderUnclassifiedCourses() {
 function getAnalysisCredits() {
   const moduleProgress = state.analysisResult?.module_progress || state.analysisResult?.moduleProgress;
   if (!Array.isArray(moduleProgress) || !moduleProgress.length) return credits;
-  return moduleProgress.map((item) => ({
-    name: item.name || item.module_name || '未命名模块',
-    done: Number(item.done || item.credit_done || 0),
-    total: Number(item.total || item.credit_required || 0),
-    missing: Number(item.missing || 0),
-    tone: item.tone || 'green',
-  }));
+  return moduleProgress.map((item) => {
+    const rawDone = Number(item.done ?? item.credit_done ?? 0);
+    const total = Number(item.total ?? item.credit_required ?? 0);
+    const done = total > 0 ? Math.min(rawDone, total) : rawDone;
+    return {
+      name: item.name || item.module_name || '未命名模块',
+      done,
+      total,
+      missing: Number(Math.max(total - done, 0).toFixed(1)),
+      tone: item.tone || (total && done >= total ? 'green' : 'red'),
+    };
+  });
 }
 
 function renderTranscriptTasks() {
