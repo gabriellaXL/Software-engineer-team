@@ -1166,6 +1166,25 @@ async function importKnowledgePoliciesFile(file) {
   return data;
 }
 
+async function downloadImportTemplate(type, fallbackName) {
+  const response = await fetch(`${API_BASE_URL}/basic/import-export/templates/${encodeURIComponent(type)}`, {
+    headers: apiHeaders()
+  });
+  if (!response.ok) {
+    let message = "导入模板下载失败";
+    try {
+      const data = await response.json();
+      message = data.error || message;
+    } catch (error) {
+      // Ignore non-JSON error bodies.
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const fileName = parseDownloadFileName(response.headers.get("Content-Disposition")) || fallbackName;
+  triggerBlobDownload(blob, fileName);
+}
+
 // Authentication API call
 async function login(accountId, password, role) {
   try {
@@ -3106,6 +3125,7 @@ function renderKnowledgeManage() {
     `,
     {
       headerActions: [
+        ["knowledge-template", "下载模板", "download", "ghost-button"],
         ["knowledge-import", "批量导入", "upload", "ghost-button"],
         ["knowledge-new", "新增条目", "plus", "primary-button"]
       ],
@@ -5241,6 +5261,16 @@ document.addEventListener("click", async (event) => {
     if (input) input.click();
     return;
   }
+  if (action === "knowledge-template") {
+    try {
+      showToast("正在下载知识库导入模板...");
+      await downloadImportTemplate("policies", "knowledge-policies-template.xlsx");
+      showToast("知识库导入模板已开始下载。");
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
   if (action === "knowledge-new") {
     state.editingPolicyId = null;
     render();
@@ -5987,9 +6017,13 @@ document.addEventListener("change", async (event) => {
       render();
       const imported = result.imported || 0;
       const failed = result.failed || 0;
-      showToast(`批量导入完成：成功 ${imported} 条${failed ? `，失败 ${failed} 条` : ""}。`);
+      if (!imported && failed) {
+        showToast("导入失败：请使用知识库导入模板，并填写标题、关键词、内容。");
+      } else {
+        showToast(`批量导入完成：成功 ${imported} 条${failed ? `，失败 ${failed} 条` : ""}。`);
+      }
       if (Array.isArray(result.errors) && result.errors.length) {
-        alert(`部分数据未导入：\n${result.errors.slice(0, 6).join("\n")}`);
+        alert(`${imported ? "部分数据未导入" : "数据未导入"}：\n${result.errors.slice(0, 6).join("\n")}\n\n请使用“下载模板”得到的 Excel 表头后再导入。`);
       }
     } catch (error) {
       showToast(error.message);

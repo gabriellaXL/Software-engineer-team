@@ -132,6 +132,26 @@ function parseWorkbookInput(fileData) {
   };
 }
 
+function normalizeHeaderName(value) {
+  return String(value || '').replace(/\s+/g, '').toLowerCase();
+}
+
+function findHeaderIndex(labels, header) {
+  const candidates = [header.label, header.key, ...(header.aliases || [])].map(normalizeHeaderName);
+  return labels.findIndex((label) => candidates.includes(normalizeHeaderName(label)));
+}
+
+function getMissingRequiredHeaders(labels, config) {
+  if (!Array.isArray(config.requiredImportHeaders) || !config.requiredImportHeaders.length) {
+    return [];
+  }
+  return config.requiredImportHeaders
+    .map((key) => config.headers.find((header) => header.key === key))
+    .filter(Boolean)
+    .filter((header) => findHeaderIndex(labels, header) < 0)
+    .map((header) => header.label);
+}
+
 function normalizeRole(role) {
   const value = String(role || '').trim();
   const roleMap = {
@@ -538,15 +558,16 @@ const IMPORT_EXPORT_TYPES = {
   },
   policies: {
     filenameBase: 'knowledge-policies',
+    requiredImportHeaders: ['title', 'keywords', 'content'],
     headers: [
-      { key: 'policyId', label: '政策ID' },
-      { key: 'title', label: '标题' },
-      { key: 'category', label: '分类' },
-      { key: 'keywords', label: '关键词' },
-      { key: 'content', label: '内容' },
-      { key: 'status', label: '状态' },
-      { key: 'attachmentName', label: '附件名称' },
-      { key: 'attachmentUrl', label: '附件地址' }
+      { key: 'policyId', label: '政策ID', aliases: ['ID', '编号', '政策编号', '条目ID'] },
+      { key: 'title', label: '标题', aliases: ['政策标题', '条目标题', '名称', '问题'] },
+      { key: 'category', label: '分类', aliases: ['类别', '类型', '政策分类'] },
+      { key: 'keywords', label: '关键词', aliases: ['关键字', '检索词', '搜索词'] },
+      { key: 'content', label: '内容', aliases: ['政策内容', '正文', '标准答复', '答复', '答案', '说明'] },
+      { key: 'status', label: '状态', aliases: ['启用状态', '发布状态'] },
+      { key: 'attachmentName', label: '附件名称', aliases: ['附件名', '文件名'] },
+      { key: 'attachmentUrl', label: '附件地址', aliases: ['附件链接', '附件URL', '文件地址'] }
     ],
     async exportRows() {
       await ensurePolicyColumns();
@@ -736,10 +757,8 @@ function rowsFromCsv(labels, rows, config) {
   return rows.map((values) => {
     const row = {};
     config.headers.forEach((header) => {
-      const labelIndex = labels.indexOf(header.label);
-      const keyIndex = labels.indexOf(header.key);
-      const index = labelIndex >= 0 ? labelIndex : keyIndex;
-      row[header.key] = index >= 0 ? (values[index] || '').trim() : '';
+      const index = findHeaderIndex(labels, header);
+      row[header.key] = index >= 0 ? String(values[index] ?? '').trim() : '';
     });
     return row;
   });
@@ -774,6 +793,12 @@ exports.importData = async (req, res) => {
 
     const config = getTypeConfig(req.params.type);
     const parsed = parseWorkbookInput(fileData);
+    const missingHeaders = getMissingRequiredHeaders(parsed.labels, config);
+    if (missingHeaders.length) {
+      return res.status(400).json({
+        error: `Excel 表头不匹配，请先下载并使用导入模板；缺少列：${missingHeaders.join('、')}`
+      });
+    }
     const normalizedRows = rowsFromCsv(parsed.labels, parsed.rows, config);
     const result = await config.importRows(normalizedRows);
     res.json(result);
